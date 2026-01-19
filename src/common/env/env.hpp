@@ -345,7 +345,9 @@ public:
 
     bool sync_barrier;
     bool sync_deps;
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     bool enable_ze_barrier;
     bool enable_ze_bidir_algo;
     bool enable_ze_cache;
@@ -388,7 +390,7 @@ public:
     type2_tune_mode type2_mode;
     std::string drmfd_dev_render_dir_path;
     std::string drmfd_dev_render_suffix;
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     bool ipc_allgatherv_wa;
 
 #ifdef CCL_ENABLE_PMIX

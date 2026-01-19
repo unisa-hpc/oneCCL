@@ -30,12 +30,12 @@
 
 #define ONECCL_SPEC_VERSION "1.0"
 
-#define CCL_MAJOR_VERSION           @CCL_MAJOR_VERSION@
-#define CCL_MINOR_VERSION           @CCL_MINOR_VERSION@
-#define CCL_UPDATE_VERSION          @CCL_UPDATE_VERSION@
-#cmakedefine CCL_PRODUCT_STATUS     "@CCL_PRODUCT_STATUS@"
-#cmakedefine CCL_PRODUCT_BUILD_DATE "@CCL_PRODUCT_BUILD_DATE@"
-#cmakedefine CCL_PRODUCT_FULL       "@CCL_PRODUCT_FULL@"
+#define CCL_MAJOR_VERSION           2021
+#define CCL_MINOR_VERSION           17
+#define CCL_UPDATE_VERSION          0
+#define CCL_PRODUCT_STATUS     "Gold"
+#define CCL_PRODUCT_BUILD_DATE "2026-01-19T 18:40:46Z"
+#define CCL_PRODUCT_FULL       "Gold-2021.17.0 2026-01-19T 18:40:46Z (master/93f2621)"
 
 /* Enable SYCL support for:
  * 1. Intel oneAPI DPC++ compiler (__INTEL_LLVM_COMPILER)

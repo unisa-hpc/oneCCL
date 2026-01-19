@@ -73,7 +73,7 @@ sycl::event submit_barrier(sycl::queue queue, sycl::event event) {
 #endif // ICPX_VERSION
 }
 
-#ifdef CCL_ENABLE_SYCL_INTEROP_EVENT
+#if defined(CCL_ENABLE_SYCL_INTEROP_EVENT) && defined(CCL_ENABLE_ZE)
 sycl::event make_event(const sycl::context& context, const ze_event_handle_t& sync_event) {
 #if ICPX_VERSION >= 140000
     return sycl::make_event<sycl::backend::ext_oneapi_level_zero>(
@@ -83,11 +83,13 @@ sycl::event make_event(const sycl::context& context, const ze_event_handle_t& sy
         context, sync_event, sycl::level_zero::ownership::keep);
 #endif // ICPX_VERSION
 }
-#endif // CCL_ENABLE_SYCL_INTEROP_EVENT
+#endif // CCL_ENABLE_SYCL_INTEROP_EVENT && CCL_ENABLE_ZE
 
+#ifdef CCL_ENABLE_ZE
 ze_event_handle_t get_native_event(sycl::event event) {
     return sycl::get_native<ccl::utils::get_level_zero_backend()>(event);
 }
+#endif // CCL_ENABLE_ZE
 
 } // namespace utils
 } // namespace ccl

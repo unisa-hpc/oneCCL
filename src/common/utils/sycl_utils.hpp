@@ -15,7 +15,9 @@
 */
 #pragma once
 
+#ifdef CCL_ENABLE_ZE
 #include "common/api_wrapper/ze_api_wrapper.hpp"
+#endif // CCL_ENABLE_ZE
 
 #if __has_include(<sycl/sycl.hpp>)
 #include <sycl/sycl.hpp>
@@ -39,6 +41,7 @@
 #error "Unsupported compiler"
 #endif
 
+#ifdef CCL_ENABLE_ZE
 #if CCL_USE_SYCL121_API
 #include <CL/sycl/backend_types.hpp>
 #include <CL/sycl/backend/level_zero.hpp>
@@ -46,6 +49,7 @@
 #include <sycl/backend_types.hpp>
 #include <sycl/ext/oneapi/backend/level_zero.hpp>
 #endif // CCL_USE_SYCL121_API
+#endif // CCL_ENABLE_ZE
 
 #ifdef SYCL_LANGUAGE_VERSION
 #define ICPX_VERSION __clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__
@@ -64,6 +68,7 @@ bool should_use_sycl_output_event(const ccl_stream* stream);
 std::string usm_type_to_str(sycl::usm::alloc type);
 std::string sycl_device_to_str(const sycl::device& dev);
 
+#ifdef CCL_ENABLE_ZE
 constexpr sycl::backend get_level_zero_backend() {
 #if ICPX_VERSION >= 140000
     return sycl::backend::ext_oneapi_level_zero;
@@ -71,15 +76,18 @@ constexpr sycl::backend get_level_zero_backend() {
     return sycl::backend::level_zero;
 #endif // ICPX_VERSION
 }
+#endif // CCL_ENABLE_ZE
 
 sycl::event submit_barrier(sycl::queue queue);
 sycl::event submit_barrier(sycl::queue queue, sycl::event event);
 
-#ifdef CCL_ENABLE_SYCL_INTEROP_EVENT
+#if defined(CCL_ENABLE_SYCL_INTEROP_EVENT) && defined(CCL_ENABLE_ZE)
 sycl::event make_event(const sycl::context& context, const ze_event_handle_t& sync_event);
-#endif // CCL_ENABLE_SYCL_INTEROP_EVENT
+#endif // CCL_ENABLE_SYCL_INTEROP_EVENT && CCL_ENABLE_ZE
 
+#ifdef CCL_ENABLE_ZE
 ze_event_handle_t get_native_event(sycl::event event);
+#endif // CCL_ENABLE_ZE
 
 } // namespace utils
 } // namespace ccl

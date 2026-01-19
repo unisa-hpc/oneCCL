@@ -302,7 +302,9 @@ env_data::env_data()
 
           sync_barrier(0),
           sync_deps(0),
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
           enable_ze_barrier(0),
           enable_ze_bidir_algo(1),
           enable_ze_cache(1),
@@ -355,7 +357,7 @@ env_data::env_data()
           drmfd_dev_render_dir_path("/dev/dri/by-path/"),
           drmfd_dev_render_suffix("-render"),
 #endif // CCL_ENABLE_DRM
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
           ipc_allgatherv_wa(1),
 
 #ifdef CCL_ENABLE_PMIX
@@ -712,7 +714,9 @@ void env_data::parse() {
 
     p.env_2_type(CCL_BARRIER_SYNC, sync_barrier);
     p.env_2_type(CCL_ZE_DEPS_SYNC, sync_deps);
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     p.env_2_type(CCL_ZE_BARRIER, enable_ze_barrier);
     p.env_2_type(CCL_ZE_BIDIR_ALGO, enable_ze_bidir_algo);
     p.env_2_type(CCL_ZE_CACHE, enable_ze_cache);
@@ -781,7 +785,7 @@ void env_data::parse() {
     p.env_2_enum(CCL_ZE_TYPE2_TUNE_PORTS, type2_tune_mode_names, type2_mode);
     p.env_2_type(CCL_DRMFD_DEV_RENDER_DIR_PATH, drmfd_dev_render_dir_path);
     p.env_2_type(CCL_DRMFD_DEV_RENDER_SUFFIX, drmfd_dev_render_suffix);
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     p.env_2_type(CCL_IPC_ALLGATHERV_WA, ipc_allgatherv_wa);
 
 #ifdef CCL_ENABLE_PMIX
@@ -1173,7 +1177,9 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
     LOG_INFO_PROFILED(CCL_BARRIER_SYNC, ": ", sync_barrier);
     LOG_INFO_PROFILED(CCL_ZE_DEPS_SYNC, ": ", sync_deps);
     LOG_INFO_PROFILED(CCL_USE_HMEM, ": ", use_hmem);
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     LOG_INFO_PROFILED(CCL_ZE_BARRIER, ": ", enable_ze_barrier);
     LOG_INFO_PROFILED(CCL_ZE_BIDIR_ALGO, ": ", enable_ze_bidir_algo);
     LOG_INFO_PROFILED(CCL_ZE_CACHE, ": ", enable_ze_cache);
@@ -1226,7 +1232,7 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
     LOG_INFO_PROFILED(CCL_ZE_TYPE2_TUNE_PORTS, ": ", str_by_enum(type2_tune_mode_names, type2_mode));
     LOG_INFO_PROFILED(CCL_DRMFD_DEV_RENDER_DIR_PATH, ": ", drmfd_dev_render_dir_path);
     LOG_INFO_PROFILED(CCL_DRMFD_DEV_RENDER_SUFFIX, ": ", drmfd_dev_render_suffix);
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     LOG_INFO_PROFILED(CCL_IPC_ALLGATHERV_WA, ": ", ipc_allgatherv_wa);
 
 #ifdef CCL_ENABLE_PMIX

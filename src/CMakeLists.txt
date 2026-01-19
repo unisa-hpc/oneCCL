@@ -50,7 +50,6 @@ if (CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
 
         common/global/ze/ze_data.cpp
         common/global/ze/ze_fd_manager.cpp
-        common/utils/sycl_utils.cpp
         common/api_wrapper/ze_api_wrapper.cpp
 
         sched/ze/ze_event_manager.cpp
@@ -114,6 +113,13 @@ if (CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
         )
     endif(ENABLE_UMF)
 endif(CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
+
+# SYCL-only sources (no ZE dependency)
+if (CCL_ENABLE_SYCL)
+    list (APPEND EXTENSIONS_SRC
+        common/utils/sycl_utils.cpp
+    )
+endif(CCL_ENABLE_SYCL)
 
 set(CCL_SRC
 

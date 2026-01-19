@@ -22,8 +22,11 @@
 
 #ifdef CCL_ENABLE_SYCL
 #include "common/utils/sycl_utils.hpp"
-#include "sched/entry/ze/ze_primitives.hpp"
 #endif // CCL_ENABLE_SYCL
+
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
+#include "sched/entry/ze/ze_primitives.hpp"
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
 enum class copy_direction { undefined, h2h, d2h, h2d, d2d, t2t, c2c };
 std::string to_string(copy_direction val);

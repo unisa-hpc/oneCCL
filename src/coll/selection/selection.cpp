@@ -222,12 +222,12 @@ static bool ccl_is_device_side_algo(ccl_coll_algo algo, const ccl_selector_param
     }
     else if (param.ctype == ccl_coll_reduce_scatter) {
         // limitation: topo algorithm is disabled for reduce_scatter with unidirectional algo
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
         return algo.reduce_scatter == ccl_coll_reduce_scatter_topo &&
                ccl::global_data::env().enable_ze_bidir_algo;
-#else // CCL_ENABLE_SYCL
+#else // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
         return algo.reduce_scatter == ccl_coll_reduce_scatter_topo;
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     }
     else if (param.ctype == ccl_coll_send) {
         return algo.send == ccl_coll_send_topo;
@@ -291,11 +291,11 @@ bool ccl_is_device_side_algo(const ccl_selector_param& param) {
 }
 
 bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     RETURN_FALSE_IF(!param.comm->get_env()->get_enable_topo_algo(), "topo algo is disabled");
-#else // CCL_ENABLE_SYCL
+#else // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     return false;
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     auto supported_colls = { ccl_coll_allgather,      ccl_coll_allgatherv, ccl_coll_allreduce,
                              ccl_coll_alltoall,       ccl_coll_alltoallv,  ccl_coll_bcast,
@@ -324,7 +324,7 @@ bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
                     "unordered coll is not supported");
     RETURN_FALSE_IF(ccl::global_data::env().priority_mode != ccl_priority_none, "wrong priority");
     RETURN_FALSE_IF(ccl::global_data::env().worker_count != 1
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
                         && !ccl::global_data::env().ze_multi_workers
 #endif
                     ,
@@ -334,7 +334,7 @@ bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
     // we can't use topo algorithm without sub-communicators
     RETURN_FALSE_IF(!param.comm->get_even_comm().get(), "sub-communicators are not available");
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     RETURN_FALSE_IF(!param.comm->get_topo_manager().has_p2p_access(),
                     "no p2p access between devices");
     // WA
@@ -404,7 +404,7 @@ bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
         }
 #endif // !CCL_BF16_GPU_TRUNCATE
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     RETURN_FALSE_IF((param.ctype == ccl_coll_bcast || param.ctype == ccl_coll_broadcast) &&
                         !checkers::is_single_node(param),
@@ -458,7 +458,7 @@ bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
                 ccl::global_data::env().recv_algo_raw);
         }
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
         auto rank_color = param.comm->get_topo_manager().get_intra_card_color(param.comm->rank());
         auto peer_rank_color = param.comm->get_topo_manager().get_intra_card_color(param.peer_rank);
 
@@ -477,7 +477,7 @@ bool ccl_can_use_topo_algo(const ccl_selector_param& param) {
                       param.peer_rank,
                       " }");
         }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
         RETURN_FALSE_IF(
             group_impl::is_group_active && ccl::global_data::env().atl_transport == ccl_atl_ofi,

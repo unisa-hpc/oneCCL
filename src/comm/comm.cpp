@@ -53,7 +53,7 @@ struct impl_dispatch {
 // ccl_comm_env
 
 ccl_comm_env::ccl_comm_env(std::shared_ptr<ccl::device> device) : device(device) {
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     enable_topo_algo = ccl::global_data::env().enable_topo_algo;
     ze_copy_engine = ccl::global_data::env().ze_copy_engine;
     ze_h2d_copy_engine = ccl::global_data::env().ze_h2d_copy_engine;
@@ -75,21 +75,21 @@ ccl_comm_env::ccl_comm_env(std::shared_ptr<ccl::device> device) : device(device)
         ze_copy_engine = ccl::ze::copy_engine_mode::none;
         ze_h2d_copy_engine = ccl::ze::h2d_copy_engine_mode::none;
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 }
 
 std::string ccl_comm_env::to_string() const {
     std::stringstream ss;
     ss << "{";
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     if (device) {
         ss << " enable_topo_algo: " << enable_topo_algo;
         ss << ", ze_copy_engine: " << ccl::ze::copy_engine_names[ze_copy_engine];
         ss << ", ze_h2d_copy_engine: " << ccl::ze::h2d_copy_engine_names[ze_h2d_copy_engine];
         ss << " ";
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     ss << "}";
 
@@ -572,9 +572,11 @@ void* ccl_scaleout_host_bufs::get_scaleout_host_buf() {
         }
         CCL_THROW_IF_NOT(host_bufs[index] != nullptr, "Cannot allocate host buffer");
 
+#ifdef CCL_ENABLE_ZE
         if (global_data.ze_data->external_pointer_registration_enabled) {
             global_data.ze_data->import_external_pointer(host_bufs[index], buf_size);
         }
+#endif // CCL_ENABLE_ZE
     }
 
     auto old_index = index;
@@ -599,9 +601,11 @@ ccl_scaleout_host_bufs::~ccl_scaleout_host_bufs() {
     try {
         for (int i = 0; i < buf_count; ++i) {
             if (host_bufs[i] != nullptr) {
+#ifdef CCL_ENABLE_ZE
                 if (ccl::global_data::get().ze_data->external_pointer_registration_enabled) {
                     ccl::global_data::get().ze_data->release_imported_pointer(host_bufs[i]);
                 }
+#endif // CCL_ENABLE_ZE
 
                 switch (ccl::global_data::env().sycl_scaleout_buf_alloc_mode) {
                     case ccl::utils::alloc_mode::hwloc:
@@ -774,12 +778,14 @@ void ccl_scaleout_pipeline_bufs::allocate_pipe_chunks(int num_bufs) {
     }
     CCL_THROW_IF_NOT(send_pipe_buffer, "malloc send_pipe_buffer failed");
     CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc recv_pipe_buffer failed");
+#ifdef CCL_ENABLE_ZE
     if (global_data.ze_data->external_pointer_registration_enabled) {
         global_data.ze_data->import_external_pointer(send_pipe_buffer,
                                                      num_chunk_buffs * max_chunk_size);
         global_data.ze_data->import_external_pointer(recv_pipe_buffer,
                                                      num_chunk_buffs * max_chunk_size);
     }
+#endif // CCL_ENABLE_ZE
     for (int i = 0; i < num_chunk_buffs; i++) {
         send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
         recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;
@@ -791,10 +797,12 @@ ccl_scaleout_pipeline_bufs::~ccl_scaleout_pipeline_bufs() {
         return;
     try {
         auto& global_data = ccl::global_data::get();
+#ifdef CCL_ENABLE_ZE
         if (global_data.ze_data->external_pointer_registration_enabled) {
             global_data.ze_data->release_imported_pointer(send_pipe_buffer);
             global_data.ze_data->release_imported_pointer(recv_pipe_buffer);
         }
+#endif // CCL_ENABLE_ZE
         switch (ccl::global_data::env().sycl_scaleout_buf_alloc_mode) {
             case ccl::utils::alloc_mode::hwloc: {
                 // fallback to memalign if worker_affinity is not set by user
@@ -831,8 +839,10 @@ ccl_scaleout_pipeline_bufs::ccl_scaleout_pipeline_bufs(const ccl_scaleout_pipeli
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(send_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(send_pipe_buffer, other.send_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(send_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
@@ -846,8 +856,10 @@ ccl_scaleout_pipeline_bufs::ccl_scaleout_pipeline_bufs(const ccl_scaleout_pipeli
             CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc scaleout_device_buf failed");
         }
         std::memcpy(recv_pipe_buffer, other.recv_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(recv_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;
@@ -877,8 +889,10 @@ ccl_scaleout_pipeline_bufs& ccl_scaleout_pipeline_bufs::operator=(
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(send_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(send_pipe_buffer, other.send_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(send_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
@@ -890,8 +904,10 @@ ccl_scaleout_pipeline_bufs& ccl_scaleout_pipeline_bufs::operator=(
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(recv_pipe_buffer, other.recv_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(recv_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;

@@ -641,11 +641,13 @@ void add_scaleout(ccl_sched* sched,
               " done");
 }
 
+#endif // CCL_ENABLE_ZE && CCL_ENABLE_SYCL
+
+#ifdef CCL_ENABLE_SYCL
 bool is_queue_in_order(const ccl_stream* s) {
     return s != nullptr && s->is_sycl_device_stream() && s->get_native_stream().is_in_order();
 }
-
-#endif // CCL_ENABLE_ZE && CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL
 
 CCL_API bool is_allgatherv_inplace(const void* send_buf,
                                    const size_t send_count,

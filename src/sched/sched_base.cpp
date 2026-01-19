@@ -460,10 +460,12 @@ void ccl_sched_base::alloc_buffers_for_pre_post_copy() {
         return;
     }
 
+#ifdef CCL_ENABLE_ZE
     if (!check_pt2pt_pre_post_copy_support(
             param, (ccl_is_offload_pt2pt_algo(selector_param) && use_pt2pt_offload_algo()))) {
         return;
     }
+#endif // CCL_ENABLE_ZE
 
     bool should_alloc_buffers = true;
 
