@@ -320,6 +320,9 @@ public:
     bool mpi_bf16_native;
     bool mpi_fp16_native;
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    std::string nccl_lib_path;
+#endif // CCL_ENABLE_NCCL
     std::string ofi_lib_path;
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)

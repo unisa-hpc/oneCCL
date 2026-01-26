@@ -257,9 +257,9 @@ env_data::env_data()
           process_launcher(process_launcher_mode::hydra),
 
           enable_topo_algo(1),
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
           topo_color(topo_color_mode::ze),
-#else // CCL_ENABLE_SYCL
+#else // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
           topo_color(topo_color_mode::fixed),
 #endif // CCL_ENABLE_SYCL
           enable_p2p_access(CCL_ENV_INT_NOT_SPECIFIED),
@@ -654,6 +654,9 @@ void env_data::parse() {
     p.env_2_type(CCL_ATL_MPI_BF16, mpi_bf16_native);
     p.env_2_type(CCL_ATL_MPI_FP16, mpi_fp16_native);
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    p.env_2_type(CCL_NCCL_LIBRARY_PATH, nccl_lib_path);
+#endif // CCL_ENABLE_NCCL
     p.env_2_type(CCL_OFI_LIBRARY_PATH, ofi_lib_path);
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)
@@ -1134,6 +1137,11 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
                       ": ",
                       (!mpi_lib_path.empty()) ? mpi_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    LOG_INFO_PROFILED(CCL_NCCL_LIBRARY_PATH,
+                      ": ",
+                      (!nccl_lib_path.empty()) ? nccl_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
+#endif // CCL_ENABLE_NCCL
     LOG_INFO_PROFILED(CCL_OFI_LIBRARY_PATH,
                       ": ",
                       (!ofi_lib_path.empty()) ? ofi_lib_path : CCL_ENV_STR_NOT_SPECIFIED);

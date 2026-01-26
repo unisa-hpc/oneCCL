@@ -121,6 +121,12 @@ if (CCL_ENABLE_SYCL)
     )
 endif(CCL_ENABLE_SYCL)
 
+if (CCL_ENABLE_NCCL)
+    list (APPEND EXTENSIONS_SRC
+        common/api_wrapper/nccl_api_wrapper.cpp
+    )
+endif(CCL_ENABLE_NCCL)
+
 set(CCL_SRC
 
     atl/atl_base_comm.cpp
@@ -391,7 +397,7 @@ target_include_directories(ccl-objects PRIVATE ${SRC_INCLUDE_DIRS})
 target_include_directories(ccl-objects SYSTEM PRIVATE ${SRC_SYSTEM_INCLUDE_DIRS})
 
 if (COMPUTE_BACKEND_TARGET_NAME)
-    target_include_directories(ccl-objects PUBLIC ${INTERFACE_INCLUDE_DIRECTORIES})
+    target_include_directories(ccl-objects PUBLIC ${COMPUTE_BACKEND_INCLUDE_DIRS})
 endif()
 
 # shared library

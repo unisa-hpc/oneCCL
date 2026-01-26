@@ -34,8 +34,8 @@
 #define CCL_MINOR_VERSION           17
 #define CCL_UPDATE_VERSION          0
 #define CCL_PRODUCT_STATUS     "Gold"
-#define CCL_PRODUCT_BUILD_DATE "2026-01-19T 18:40:46Z"
-#define CCL_PRODUCT_FULL       "Gold-2021.17.0 2026-01-19T 18:40:46Z (master/93f2621)"
+#define CCL_PRODUCT_BUILD_DATE "2026-01-26T 12:43:25Z"
+#define CCL_PRODUCT_FULL       "Gold-2021.17.0 2026-01-26T 12:43:25Z (nccl-backend/3a7fd10)"
 
 /* Enable SYCL support for:
  * 1. Intel oneAPI DPC++ compiler (__INTEL_LLVM_COMPILER)
@@ -51,4 +51,9 @@
 #define CCL_ENABLE_ZE
 #endif
 #endif
+#endif
+
+/* NCCL support is configured by CMake (-DCCL_ENABLE_NCCL=ON) */
+#ifndef CCL_ENABLE_NCCL
+#define CCL_ENABLE_NCCL
 #endif

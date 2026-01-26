@@ -52,3 +52,8 @@
 #endif
 #endif
 #endif
+
+/* NCCL support is configured by CMake (-DCCL_ENABLE_NCCL=ON) */
+#ifndef CCL_ENABLE_NCCL
+#cmakedefine CCL_ENABLE_NCCL
+#endif
