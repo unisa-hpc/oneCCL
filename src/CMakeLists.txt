@@ -124,6 +124,8 @@ endif(CCL_ENABLE_SYCL)
 if (CCL_ENABLE_NCCL)
     list (APPEND EXTENSIONS_SRC
         common/api_wrapper/nccl_api_wrapper.cpp
+        nccl_kvs_impl.cpp
+        comm/nccl_comm.cpp
     )
 endif(CCL_ENABLE_NCCL)
 

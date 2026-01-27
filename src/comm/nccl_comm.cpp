@@ -1,0 +1,336 @@
+/*
+ Copyright 2016-2020 Intel Corporation
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+*/
+#ifdef CCL_ENABLE_NCCL
+
+#include "comm/nccl_comm.hpp"
+#include "common/event/impls/stub_event.hpp"
+#include "nccl_kvs_impl.hpp"
+#include "common/log/log.hpp"
+
+#if defined(CCL_ENABLE_SYCL)
+#include <sycl/sycl.hpp>
+#endif
+
+namespace ccl {
+
+nccl_comm::nccl_comm(device_t device,
+                     context_t context,
+                     size_t size,
+                     size_t rank,
+                     ncclUniqueId nccl_id,
+                     std::shared_ptr<ccl::kvs> kvs,
+                     const ccl::nccl_kvs_impl* kvs_impl)
+        : device_ptr(std::make_shared<ccl::device>(device)),
+          context_ptr(std::make_shared<ccl::context>(context)),
+          comm_rank(rank),
+          comm_size(size),
+          kvs(kvs),
+          kvs_impl(kvs_impl) {
+
+    LOG_DEBUG("NCCL COMM: Initializing communicator for rank ", rank, "/", size);
+
+    // Inizializza il communicator NCCL
+    ncclResult_t status = ncclCommInitRank(&nccl_comm_handle, size, nccl_id, rank);
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "ncclCommInitRank failed: ", ncclGetErrorString(status));
+
+    LOG_INFO("NCCL COMM: Communicator initialized successfully for rank ", rank, "/", size);
+}
+
+nccl_comm::~nccl_comm() {
+    LOG_DEBUG("NCCL COMM: Destroying communicator for rank ", comm_rank);
+
+    if (nccl_comm_handle != nullptr) {
+        ncclResult_t status = ncclCommDestroy(nccl_comm_handle);
+        if (status != ncclSuccess) {
+            LOG_WARN("NCCL COMM: ncclCommDestroy failed: ", ncclGetErrorString(status));
+        }
+    }
+}
+
+nccl_comm* nccl_comm::create(device_t device,
+                             context_t context,
+                             size_t size,
+                             size_t rank,
+                             std::shared_ptr<ccl::kvs_interface> kvs_interface) {
+    auto kvs_inst = std::dynamic_pointer_cast<ccl::kvs>(kvs_interface);
+    CCL_THROW_IF_NOT(kvs_inst != nullptr, "only ccl::kvs is allowed with NCCL backend");
+
+    auto kvs_impl = ccl::get_kvs_impl_typed<nccl_kvs_impl>(kvs_inst);
+
+    // Estrai l'ncclUniqueId dal KVS
+    ncclUniqueId nccl_id = kvs_impl->get_nccl_id();
+
+    return new nccl_comm(device, context, size, rank, nccl_id, std::move(kvs_inst), kvs_impl);
+}
+
+/* barrier */
+ccl::event nccl_comm::barrier_impl(const ccl::stream::impl_value_t& stream,
+                                   const ccl::barrier_attr& attr,
+                                   const ccl::vector_class<ccl::event>& deps) {
+    // NCCL non ha una barrier nativa, usiamo allreduce di un dummy byte
+    LOG_DEBUG("NCCL COMM: barrier (simulated with allreduce)");
+
+    int dummy = 0;
+    cudaStream_t cuda_stream = get_cuda_stream(stream);
+
+    ncclResult_t status = ncclAllReduce(&dummy, &dummy, 1, ncclInt, ncclSum,
+                                        nccl_comm_handle, cuda_stream);
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "NCCL barrier (allreduce) failed: ", ncclGetErrorString(status));
+
+    // Ritorna un evento nativo (per ora sincrono)
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+}
+
+/* allreduce */
+ccl::event nccl_comm::allreduce_impl(const void* send_buf,
+                                     void* recv_buf,
+                                     size_t count,
+                                     ccl::datatype dtype,
+                                     ccl::reduction reduction,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::allreduce_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    LOG_DEBUG("NCCL COMM: allreduce count=", count, " dtype=", static_cast<int>(dtype),
+              " reduction=", static_cast<int>(reduction));
+
+    // Converti parametri CCL -> NCCL
+    ncclDataType_t nccl_dtype = get_nccl_datatype(dtype);
+    ncclRedOp_t nccl_op = get_nccl_reduction(reduction);
+    cudaStream_t cuda_stream = get_cuda_stream(stream);
+
+    // Chiama ncclAllReduce
+    ncclResult_t status = ncclAllReduce(send_buf, recv_buf, count, nccl_dtype, nccl_op,
+                                        nccl_comm_handle, cuda_stream);
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "ncclAllReduce failed: ", ncclGetErrorString(status));
+
+    LOG_DEBUG("NCCL COMM: allreduce completed successfully");
+
+    // Ritorna un evento nativo
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+}
+
+/* Helper: Estrai cudaStream_t da sycl::queue */
+cudaStream_t nccl_comm::get_cuda_stream(const ccl::stream::impl_value_t& stream) {
+#if defined(CCL_ENABLE_SYCL)
+    try {
+        // Ottieni la queue SYCL dallo stream CCL
+        auto sycl_queue = stream->get_native_stream();
+
+        // Estrai il native handle CUDA
+        // Nota: questo richiede che DPC++ sia compilato con backend CUDA
+        auto cuda_stream = sycl::get_native<sycl::backend::ext_oneapi_cuda>(sycl_queue);
+
+        LOG_DEBUG("NCCL COMM: Extracted CUDA stream: ", cuda_stream);
+        return cuda_stream;
+    }
+    catch (const std::exception& e) {
+        CCL_THROW("Failed to extract CUDA stream from SYCL queue: ", e.what());
+    }
+#else
+    CCL_THROW("SYCL support not enabled, cannot extract CUDA stream");
+#endif
+}
+
+/* Helper: Converti ccl::datatype -> ncclDataType_t */
+ncclDataType_t nccl_comm::get_nccl_datatype(ccl::datatype dtype) {
+    switch (dtype) {
+        case ccl::datatype::int8:
+            return ncclInt8;
+        case ccl::datatype::uint8:
+            return ncclUint8;
+        case ccl::datatype::int32:
+            return ncclInt32;
+        case ccl::datatype::uint32:
+            return ncclUint32;
+        case ccl::datatype::int64:
+            return ncclInt64;
+        case ccl::datatype::uint64:
+            return ncclUint64;
+        case ccl::datatype::float16:
+            return ncclFloat16;
+        case ccl::datatype::float32:
+            return ncclFloat32;
+        case ccl::datatype::float64:
+            return ncclFloat64;
+        case ccl::datatype::bfloat16:
+            return ncclBfloat16;
+        default:
+            CCL_THROW("Unsupported datatype for NCCL: ", static_cast<int>(dtype));
+    }
+}
+
+/* Helper: Converti ccl::reduction -> ncclRedOp_t */
+ncclRedOp_t nccl_comm::get_nccl_reduction(ccl::reduction reduction) {
+    switch (reduction) {
+        case ccl::reduction::sum:
+            return ncclSum;
+        case ccl::reduction::prod:
+            return ncclProd;
+        case ccl::reduction::min:
+            return ncclMin;
+        case ccl::reduction::max:
+            return ncclMax;
+        default:
+            CCL_THROW("Unsupported reduction operation for NCCL: ", static_cast<int>(reduction));
+    }
+}
+
+// Stub implementations per le altre collettive (lanciano eccezioni)
+#define NCCL_COMM_STUB_IMPL(name) \
+    CCL_THROW(#name " is not implemented for NCCL backend yet");
+
+/* allgather */
+ccl::event nccl_comm::allgather_impl(const void* send_buf,
+                                     void* recv_buf,
+                                     size_t count,
+                                     ccl::datatype dtype,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::allgather_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(allgather);
+}
+
+ccl::event nccl_comm::allgather_impl(const void* send_buf,
+                                     const ccl::vector_class<void*>& recv_buf,
+                                     size_t count,
+                                     ccl::datatype dtype,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::allgather_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(allgather);
+}
+
+/* allgatherv */
+ccl::event nccl_comm::allgatherv_impl(const void* send_buf,
+                                      size_t send_count,
+                                      void* recv_buf,
+                                      const ccl::vector_class<size_t>& recv_counts,
+                                      ccl::datatype dtype,
+                                      const ccl::stream::impl_value_t& stream,
+                                      const ccl::allgatherv_attr& attr,
+                                      const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(allgatherv);
+}
+
+ccl::event nccl_comm::allgatherv_impl(const void* send_buf,
+                                      size_t send_count,
+                                      const ccl::vector_class<void*>& recv_bufs,
+                                      const ccl::vector_class<size_t>& recv_counts,
+                                      ccl::datatype dtype,
+                                      const ccl::stream::impl_value_t& stream,
+                                      const ccl::allgatherv_attr& attr,
+                                      const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(allgatherv);
+}
+
+/* alltoall */
+ccl::event nccl_comm::alltoall_impl(const void* send_buf,
+                                    void* recv_buf,
+                                    size_t count,
+                                    ccl::datatype dtype,
+                                    const ccl::stream::impl_value_t& stream,
+                                    const ccl::alltoall_attr& attr,
+                                    const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(alltoall);
+}
+
+/* alltoallv */
+ccl::event nccl_comm::alltoallv_impl(const void* send_buf,
+                                     const ccl::vector_class<size_t>& send_counts,
+                                     void* recv_buf,
+                                     const ccl::vector_class<size_t>& recv_counts,
+                                     ccl::datatype dtype,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::alltoallv_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(alltoallv);
+}
+
+/* broadcast */
+ccl::event nccl_comm::broadcast_impl(void* buf,
+                                     size_t count,
+                                     ccl::datatype dtype,
+                                     int root,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::broadcast_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(broadcast);
+}
+
+ccl::event nccl_comm::broadcast_impl(void* send_buf,
+                                     void* recv_buf,
+                                     size_t count,
+                                     ccl::datatype dtype,
+                                     int root,
+                                     const ccl::stream::impl_value_t& stream,
+                                     const ccl::broadcast_attr& attr,
+                                     const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(broadcast);
+}
+
+/* reduce */
+ccl::event nccl_comm::reduce_impl(const void* send_buf,
+                                  void* recv_buf,
+                                  size_t count,
+                                  ccl::datatype dtype,
+                                  ccl::reduction reduction,
+                                  int root,
+                                  const ccl::stream::impl_value_t& stream,
+                                  const ccl::reduce_attr& attr,
+                                  const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(reduce);
+}
+
+/* reduce_scatter */
+ccl::event nccl_comm::reduce_scatter_impl(const void* send_buf,
+                                          void* recv_buf,
+                                          size_t recv_count,
+                                          ccl::datatype dtype,
+                                          ccl::reduction reduction,
+                                          const ccl::stream::impl_value_t& stream,
+                                          const ccl::reduce_scatter_attr& attr,
+                                          const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(reduce_scatter);
+}
+
+/* recv */
+ccl::event nccl_comm::recv_impl(void* recv_buf,
+                                size_t recv_count,
+                                ccl::datatype dtype,
+                                int peer,
+                                const ccl::stream::impl_value_t& stream,
+                                const ccl::pt2pt_attr& attr,
+                                const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(recv);
+}
+
+/* send */
+ccl::event nccl_comm::send_impl(void* send_buf,
+                                size_t send_count,
+                                ccl::datatype dtype,
+                                int peer,
+                                const ccl::stream::impl_value_t& stream,
+                                const ccl::pt2pt_attr& attr,
+                                const ccl::vector_class<ccl::event>& deps) {
+    NCCL_COMM_STUB_IMPL(send);
+}
+
+} // namespace ccl
+
+#endif // CCL_ENABLE_NCCL

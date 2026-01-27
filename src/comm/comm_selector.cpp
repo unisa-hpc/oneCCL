@@ -33,6 +33,10 @@
 #include "comm/stub_comm.hpp"
 #endif
 
+#ifdef CCL_ENABLE_NCCL
+#include "comm/nccl_comm.hpp"
+#endif
+
 #include "kvs_impl.hpp"
 
 namespace ccl {
@@ -96,6 +100,14 @@ comm_interface_ptr comm_selector::create_comm_impl(const size_t size,
     }
 #endif // CCL_ENABLE_STUB_BACKEND
 
+#ifdef CCL_ENABLE_NCCL
+    // NCCL backend for GPU
+    if (ccl::global_data::env().backend == backend_mode::nccl) {
+        return comm_interface_ptr(
+            ccl::nccl_comm::create(device, context, size, rank, std::move(kvs)));
+    }
+#endif // CCL_ENABLE_NCCL
+
     return comm_interface_ptr(
         ccl_comm::create(device, context, size, rank, std::move(kvs), internal_attr));
 }
@@ -147,6 +159,14 @@ comm_interface_ptr comm_selector::create_comm_implExt(const size_t size,
         return comm_interface_ptr(ccl::stub_comm::create(device, context, size, rank, kvs));
     }
 #endif // CCL_ENABLE_STUB_BACKEND
+
+#ifdef CCL_ENABLE_NCCL
+    // NCCL backend for GPU
+    if (ccl::global_data::env().backend == backend_mode::nccl) {
+        return comm_interface_ptr(
+            ccl::nccl_comm::create(device, context, size, rank, std::move(kvs)));
+    }
+#endif // CCL_ENABLE_NCCL
 
     return comm_interface_ptr(ccl_comm::createExt(device, context, size, rank, kvs, internal_attr));
 }
