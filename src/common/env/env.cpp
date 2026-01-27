@@ -63,8 +63,11 @@ std::map<ccl_staging_buffer, std::string> env_data::staging_buffer_names = {
 std::map<backend_mode, std::string> env_data::backend_names = {
     std::make_pair(backend_mode::native, "native"),
 #ifdef CCL_ENABLE_STUB_BACKEND
-    std::make_pair(backend_mode::stub, "stub")
+    std::make_pair(backend_mode::stub, "stub"),
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+    std::make_pair(backend_mode::nccl, "nccl")
+#endif
 };
 
 std::map<process_launcher_mode, std::string> env_data::process_launcher_names = {

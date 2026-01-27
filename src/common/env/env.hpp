@@ -58,8 +58,11 @@ enum ccl_staging_buffer { ccl_staging_regular,
 enum class backend_mode {
     native,
 #ifdef CCL_ENABLE_STUB_BACKEND
-    stub
+    stub,
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+    nccl,
+#endif
 };
 
 enum class process_launcher_mode {

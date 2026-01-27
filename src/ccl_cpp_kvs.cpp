@@ -29,6 +29,9 @@
 #ifdef CCL_ENABLE_STUB_BACKEND
 #include "stub_kvs_impl.hpp"
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+#include "nccl_kvs_impl.hpp"
+#endif // CCL_ENABLE_NCCL
 
 namespace ccl {
 base_kvs_impl::base_kvs_impl(const kvs::address_type& addr) : addr(addr) {}
@@ -111,7 +114,11 @@ static base_kvs_impl* get_kvs_impl(const kvs::address_type& addr, const kvs_attr
         return new stub_kvs_impl(addr);
     }
 #endif // CCL_ENABLE_STUB_BACKEND
-
+#ifdef CCL_ENABLE_NCCL
+    if (ccl::global_data::env().backend == backend_mode::nccl) {
+        return new nccl_kvs_impl(addr);
+    }
+#endif // CCL_ENABLE_NCCL
     return new native_kvs_impl(addr, attr);
 }
 
@@ -122,6 +129,11 @@ static base_kvs_impl* get_kvs_impl(const kvs_attr& attr) {
         return new stub_kvs_impl();
     }
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+    if (ccl::global_data::env().backend == backend_mode::nccl) {
+        return new nccl_kvs_impl();
+    }
+#endif
 
     return new native_kvs_impl(attr);
 }
