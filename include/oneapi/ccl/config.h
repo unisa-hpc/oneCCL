@@ -34,8 +34,8 @@
 #define CCL_MINOR_VERSION           17
 #define CCL_UPDATE_VERSION          0
 #define CCL_PRODUCT_STATUS     "Gold"
-#define CCL_PRODUCT_BUILD_DATE "2026-01-26T 12:43:25Z"
-#define CCL_PRODUCT_FULL       "Gold-2021.17.0 2026-01-26T 12:43:25Z (nccl-backend/3a7fd10)"
+#define CCL_PRODUCT_BUILD_DATE "2026-01-29T 15:47:26Z"
+#define CCL_PRODUCT_FULL       "Gold-2021.17.0 2026-01-29T 15:47:26Z (nccl-backend/2ed1d64)"
 
 /* Enable SYCL support for:
  * 1. Intel oneAPI DPC++ compiler (__INTEL_LLVM_COMPILER)

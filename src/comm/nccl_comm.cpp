@@ -19,6 +19,7 @@
 #include "common/event/impls/stub_event.hpp"
 #include "nccl_kvs_impl.hpp"
 #include "common/log/log.hpp"
+#include "oneapi/ccl/api_functions.hpp"
 
 #if defined(CCL_ENABLE_SYCL)
 #include <sycl/sycl.hpp>
@@ -247,7 +248,71 @@ ccl::event nccl_comm::alltoall_impl(const void* send_buf,
                                     const ccl::stream::impl_value_t& stream,
                                     const ccl::alltoall_attr& attr,
                                     const ccl::vector_class<ccl::event>& deps) {
-    NCCL_COMM_STUB_IMPL(alltoall);
+    LOG_DEBUG("NCCL COMM: alltoall count=", count, " dtype=", static_cast<int>(dtype));
+
+    ncclDataType_t nccl_dtype = get_nccl_datatype(dtype);
+    cudaStream_t cuda_stream = get_cuda_stream(stream);
+
+#if CCL_NCCL_ALLTOALL_SUPPORTED
+    int version = 0;
+    ncclResult_t version_status = ncclGetVersion(&version);
+    if (version_status == ncclSuccess && version >= NCCL_VERSION(2, 28, 0)) {
+        auto alltoall_fn = ncclGetAllToAll();
+        if (alltoall_fn) {
+            LOG_DEBUG("NCCL COMM: using ncclAlltoAll native implementation");
+            ncclResult_t status =
+                alltoall_fn(send_buf, recv_buf, count, nccl_dtype, nccl_comm_handle, cuda_stream);
+            CCL_THROW_IF_NOT(status == ncclSuccess,
+                             "ncclAlltoAll failed: ", ncclGetErrorString(status));
+            return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+        }
+        else {
+            LOG_DEBUG("NCCL COMM: ncclAlltoAll symbol not found, fallback to send/recv");
+        }
+    }
+    else if (version_status != ncclSuccess) {
+        LOG_DEBUG("NCCL COMM: ncclGetVersion failed, fallback to send/recv: ",
+                  ncclGetErrorString(version_status));
+    }
+#endif
+    // Fallback: implementa alltoall con send/recv
+    LOG_DEBUG("NCCL COMM: using send/recv fallback implementation for alltoall");
+    const size_t dtype_size = ccl::get_datatype_size(dtype);
+    const size_t block_size = count * dtype_size;
+    const char* send_base = static_cast<const char*>(send_buf);
+    char* recv_base = static_cast<char*>(recv_buf);
+
+    ncclResult_t status = ncclGroupStart();
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "ncclGroupStart failed: ", ncclGetErrorString(status));
+
+    ncclResult_t first_error = ncclSuccess;
+    for (size_t peer = 0; peer < comm_size; ++peer) {
+        const void* send_ptr = send_base + (peer * block_size);
+        void* recv_ptr = recv_base + (peer * block_size);
+
+        status = ncclSend(send_ptr, count, nccl_dtype, static_cast<int>(peer), nccl_comm_handle,
+                          cuda_stream);
+        if (status != ncclSuccess && first_error == ncclSuccess) {
+            first_error = status;
+        }
+
+        status = ncclRecv(recv_ptr, count, nccl_dtype, static_cast<int>(peer), nccl_comm_handle,
+                          cuda_stream);
+        if (status != ncclSuccess && first_error == ncclSuccess) {
+            first_error = status;
+        }
+    }
+
+    status = ncclGroupEnd();
+    if (first_error == ncclSuccess) {
+        first_error = status;
+    }
+
+    CCL_THROW_IF_NOT(first_error == ncclSuccess,
+                     "ncclAllToAll (send/recv) failed: ", ncclGetErrorString(first_error));
+
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
 }
 
 /* alltoallv */
@@ -317,7 +382,18 @@ ccl::event nccl_comm::recv_impl(void* recv_buf,
                                 const ccl::stream::impl_value_t& stream,
                                 const ccl::pt2pt_attr& attr,
                                 const ccl::vector_class<ccl::event>& deps) {
-    NCCL_COMM_STUB_IMPL(recv);
+    LOG_DEBUG("NCCL COMM: recv count=", recv_count, " dtype=", static_cast<int>(dtype),
+              " peer=", peer);
+
+    ncclDataType_t nccl_dtype = get_nccl_datatype(dtype);
+    cudaStream_t cuda_stream = get_cuda_stream(stream);
+
+    ncclResult_t status =
+        ncclRecv(recv_buf, recv_count, nccl_dtype, peer, nccl_comm_handle, cuda_stream);
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "ncclRecv failed: ", ncclGetErrorString(status));
+
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
 }
 
 /* send */
@@ -328,7 +404,18 @@ ccl::event nccl_comm::send_impl(void* send_buf,
                                 const ccl::stream::impl_value_t& stream,
                                 const ccl::pt2pt_attr& attr,
                                 const ccl::vector_class<ccl::event>& deps) {
-    NCCL_COMM_STUB_IMPL(send);
+    LOG_DEBUG("NCCL COMM: send count=", send_count, " dtype=", static_cast<int>(dtype),
+              " peer=", peer);
+
+    ncclDataType_t nccl_dtype = get_nccl_datatype(dtype);
+    cudaStream_t cuda_stream = get_cuda_stream(stream);
+
+    ncclResult_t status =
+        ncclSend(send_buf, send_count, nccl_dtype, peer, nccl_comm_handle, cuda_stream);
+    CCL_THROW_IF_NOT(status == ncclSuccess,
+                     "ncclSend failed: ", ncclGetErrorString(status));
+
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
 }
 
 } // namespace ccl

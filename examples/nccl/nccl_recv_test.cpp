@@ -16,10 +16,9 @@
 
 #include <iostream>
 #include <vector>
-#include <cmath>
+#include <mpi.h>
 #include <sycl/sycl.hpp>
 #include <oneapi/ccl.hpp>
-#include <mpi.h>
 
 // Helper to select a GPU device based on rank
 sycl::device get_device_for_rank(int rank) {
@@ -34,14 +33,21 @@ sycl::device get_device_for_rank(int rank) {
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
 
-    int rank, size;
+    int rank = 0;
+    int size = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    /* init ccl */
+    if (size < 2) {
+        if (rank == 0) {
+            std::cout << "Need at least 2 ranks to run RECV test" << std::endl;
+        }
+        MPI_Finalize();
+        return 0;
+    }
+
     ccl::init();
 
-    /* create sycl queue */
     sycl::device dev = get_device_for_rank(rank);
     sycl::context ctx(dev);
     sycl::queue q(ctx, dev, sycl::property::queue::in_order());
@@ -64,50 +70,47 @@ int main(int argc, char* argv[]) {
     auto ccl_dev = ccl::create_device(q.get_device());
     auto ccl_ctx = ccl::create_context(q.get_context());
     auto comm = ccl::create_communicator(size, rank, ccl_dev, ccl_ctx, kvs);
-
-    /* create stream */
-    auto ccl_stream = ccl::create_stream(q);
+    auto stream = ccl::create_stream(q);
 
     /* create buffers */
-    const size_t count = 1024;
+    const size_t count = 512;
+    std::vector<int> send_data(count);
+    std::vector<int> recv_data(count, -1);
 
-    std::vector<float> send_data(count, static_cast<float>(rank + 1));  // rank 0 -> 1.0, rank 1 -> 2.0
-    std::vector<float> recv_data(count, 0.0f);
-
-    float* d_send = sycl::malloc_device<float>(count, q);
-    float* d_recv = sycl::malloc_device<float>(count, q);
-
-    q.memcpy(d_send, send_data.data(), count * sizeof(float)).wait();
-    q.memset(d_recv, 0, count * sizeof(float)).wait();
-
-    /* invoke allreduce */
-    auto event = ccl::allreduce(d_send,
-                                 d_recv,
-                                 count,
-                                 ccl::datatype::float32,
-                                 ccl::reduction::sum,
-                                 comm,
-                                 ccl_stream);
-
-    event.wait();
-    q.wait();
-
-    q.memcpy(recv_data.data(), d_recv, count * sizeof(float)).wait();
-
-    /* check result */
-    float expected = 0.0f;
-    for (int i = 0; i < size; i++) {
-        expected += static_cast<float>(i + 1);
+    for (size_t i = 0; i < count; ++i) {
+        send_data[i] = static_cast<int>(1000 + i);
     }
 
+    int* d_send = sycl::malloc_device<int>(count, q);
+    int* d_recv = sycl::malloc_device<int>(count, q);
+
+    if (rank == 1) {
+        q.memcpy(d_send, send_data.data(), count * sizeof(int)).wait();
+    }
+    q.memset(d_recv, 0, count * sizeof(int)).wait();
+
+    /* invoke send/recv */
+    if (rank == 1) {
+        ccl::send(d_send, count, ccl::datatype::int32, 0, comm, stream).wait();
+    }
+    else if (rank == 0) {
+        ccl::recv(d_recv, count, ccl::datatype::int32, 1, comm, stream).wait();
+    }
+
+    q.wait();
+
     bool success = true;
-    int errors = 0;
-    for (size_t i = 0; i < count && errors < 5; i++) {
-        if (std::fabs(recv_data[i] - expected) > 1e-5f) {
-            std::cerr << "Rank " << rank << ": ERROR at index " << i
-                      << ": got " << recv_data[i] << ", expected " << expected << std::endl;
-            success = false;
-            errors++;
+    if (rank == 0) {
+        q.memcpy(recv_data.data(), d_recv, count * sizeof(int)).wait();
+        int errors = 0;
+        for (size_t i = 0; i < count && errors < 5; ++i) {
+            int expected = static_cast<int>(1000 + i);
+            if (recv_data[i] != expected) {
+                std::cerr << "Rank " << rank << ": ERROR at index " << i
+                          << ": got " << recv_data[i] << ", expected " << expected << std::endl;
+                success = false;
+                errors++;
+            }
         }
     }
 
@@ -123,6 +126,5 @@ int main(int argc, char* argv[]) {
     }
 
     MPI_Finalize();
-
     return global_ok ? 0 : 1;
 }

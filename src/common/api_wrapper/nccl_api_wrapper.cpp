@@ -14,6 +14,7 @@
  limitations under the License.
 */
 #include <sys/stat.h>
+#include <dlfcn.h>
 
 #include "common/api_wrapper/api_wrapper.hpp"
 #include "common/api_wrapper/nccl_api_wrapper.hpp"
@@ -91,6 +92,19 @@ bool nccl_api_init() {
         LOG_WARN("NCCL version query failed: ", ncclGetErrorString(status));
     }
 
+#if CCL_NCCL_ALLTOALL_SUPPORTED
+    if (status == ncclSuccess && version >= NCCL_VERSION(2, 28, 0)) {
+        dlerror();
+        void* symbol = dlsym(nccl_lib_info.handle, "ncclAlltoAll");
+        if (symbol) {
+            nccl_lib_ops.ncclAlltoAll_ptr = reinterpret_cast<decltype(ncclAlltoAll)*>(symbol);
+        }
+        else {
+            LOG_DEBUG("NCCL symbol ncclAlltoAll not found: ", dlerror());
+        }
+    }
+#endif
+
     return true;
 }
 
@@ -98,6 +112,12 @@ void nccl_api_fini() {
     LOG_DEBUG("close NCCL lib: handle: ", nccl_lib_info.handle);
     close_library(nccl_lib_info);
 }
+
+#if CCL_NCCL_ALLTOALL_SUPPORTED
+decltype(ncclAlltoAll)* ncclGetAllToAll() {
+    return nccl_lib_ops.ncclAlltoAll_ptr;
+}
+#endif
 
 } //namespace ccl
 

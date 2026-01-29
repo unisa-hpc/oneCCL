@@ -25,6 +25,16 @@
 
 namespace ccl {
 
+#if defined(NCCL_VERSION_CODE) && defined(NCCL_VERSION)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#define CCL_NCCL_ALLTOALL_SUPPORTED 1
+#else
+#define CCL_NCCL_ALLTOALL_SUPPORTED 0
+#endif
+#else
+#define CCL_NCCL_ALLTOALL_SUPPORTED 0
+#endif
+
 typedef struct nccl_lib_ops {
     decltype(ncclGetVersion)* ncclGetVersion_ptr;
     decltype(ncclGetErrorString)* ncclGetErrorString_ptr;
@@ -35,6 +45,11 @@ typedef struct nccl_lib_ops {
     decltype(ncclGroupStart)* ncclGroupStart_ptr;
     decltype(ncclGroupEnd)* ncclGroupEnd_ptr;
     decltype(ncclAllReduce)* ncclAllReduce_ptr;
+    decltype(ncclSend)* ncclSend_ptr;
+    decltype(ncclRecv)* ncclRecv_ptr;
+#if CCL_NCCL_ALLTOALL_SUPPORTED
+    decltype(ncclAlltoAll)* ncclAlltoAll_ptr;
+#endif
 } nccl_lib_ops_t;
 
 static std::vector<std::string> nccl_fn_names = {
@@ -47,6 +62,8 @@ static std::vector<std::string> nccl_fn_names = {
     "ncclGroupStart",
     "ncclGroupEnd",
     "ncclAllReduce",
+    "ncclSend",
+    "ncclRecv",
 };
 
 extern ccl::nccl_lib_ops_t nccl_lib_ops;
@@ -60,6 +77,12 @@ extern ccl::nccl_lib_ops_t nccl_lib_ops;
 #define ncclGroupStart     ccl::nccl_lib_ops.ncclGroupStart_ptr
 #define ncclGroupEnd       ccl::nccl_lib_ops.ncclGroupEnd_ptr
 #define ncclAllReduce      ccl::nccl_lib_ops.ncclAllReduce_ptr
+#define ncclSend           ccl::nccl_lib_ops.ncclSend_ptr
+#define ncclRecv           ccl::nccl_lib_ops.ncclRecv_ptr
+
+#if CCL_NCCL_ALLTOALL_SUPPORTED
+decltype(ncclAlltoAll)* ncclGetAllToAll();
+#endif
 
 bool nccl_api_init();
 void nccl_api_fini();
