@@ -41,18 +41,17 @@ nccl_comm::nccl_comm(device_t device,
           kvs(kvs),
           kvs_impl(kvs_impl) {
 
-    LOG_DEBUG("NCCL COMM: Initializing communicator for rank ", rank, "/", size);
+    LOG_DEBUG("NCCL COMM: initializing communicator for rank ", rank, "/", size);
 
-    // Inizializza il communicator NCCL
     ncclResult_t status = ncclCommInitRank(&nccl_comm_handle, size, nccl_id, rank);
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "ncclCommInitRank failed: ", ncclGetErrorString(status));
 
-    LOG_INFO("NCCL COMM: Communicator initialized successfully for rank ", rank, "/", size);
+    LOG_INFO("NCCL COMM: communicator initialized successfully for rank ", rank, "/", size);
 }
 
 nccl_comm::~nccl_comm() {
-    LOG_DEBUG("NCCL COMM: Destroying communicator for rank ", comm_rank);
+    LOG_DEBUG("NCCL COMM: destroying communicator for rank ", comm_rank);
 
     if (nccl_comm_handle != nullptr) {
         ncclResult_t status = ncclCommDestroy(nccl_comm_handle);
@@ -72,7 +71,6 @@ nccl_comm* nccl_comm::create(device_t device,
 
     auto kvs_impl = ccl::get_kvs_impl_typed<nccl_kvs_impl>(kvs_inst);
 
-    // Estrai l'ncclUniqueId dal KVS
     ncclUniqueId nccl_id = kvs_impl->get_nccl_id();
 
     return new nccl_comm(device, context, size, rank, nccl_id, std::move(kvs_inst), kvs_impl);
@@ -82,18 +80,31 @@ nccl_comm* nccl_comm::create(device_t device,
 ccl::event nccl_comm::barrier_impl(const ccl::stream::impl_value_t& stream,
                                    const ccl::barrier_attr& attr,
                                    const ccl::vector_class<ccl::event>& deps) {
-    // NCCL non ha una barrier nativa, usiamo allreduce di un dummy byte
+    // NCCL does not have a native barrier, simulate with allreduce on a single element
     LOG_DEBUG("NCCL COMM: barrier (simulated with allreduce)");
 
-    int dummy = 0;
     cudaStream_t cuda_stream = get_cuda_stream(stream);
 
-    ncclResult_t status = ncclAllReduce(&dummy, &dummy, 1, ncclInt, ncclSum,
+    // ncclAllReduce requires device-accessible memory
+    int* d_dummy = nullptr;
+    cudaError_t cuda_err = cudaMalloc(&d_dummy, sizeof(int));
+    CCL_THROW_IF_NOT(cuda_err == cudaSuccess,
+                     "cudaMalloc for barrier dummy buffer failed: ", cudaGetErrorString(cuda_err));
+
+    cuda_err = cudaMemsetAsync(d_dummy, 0, sizeof(int), cuda_stream);
+    CCL_THROW_IF_NOT(cuda_err == cudaSuccess,
+                     "cudaMemsetAsync for barrier failed: ", cudaGetErrorString(cuda_err));
+
+    ncclResult_t status = ncclAllReduce(d_dummy, d_dummy, 1, ncclInt, ncclSum,
                                         nccl_comm_handle, cuda_stream);
+
+    // synchronize before freeing the buffer
+    cudaStreamSynchronize(cuda_stream);
+    cudaFree(d_dummy);
+
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "NCCL barrier (allreduce) failed: ", ncclGetErrorString(status));
 
-    // Ritorna un evento nativo (per ora sincrono)
     return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
 }
 
@@ -109,12 +120,10 @@ ccl::event nccl_comm::allreduce_impl(const void* send_buf,
     LOG_DEBUG("NCCL COMM: allreduce count=", count, " dtype=", static_cast<int>(dtype),
               " reduction=", static_cast<int>(reduction));
 
-    // Converti parametri CCL -> NCCL
     ncclDataType_t nccl_dtype = get_nccl_datatype(dtype);
     ncclRedOp_t nccl_op = get_nccl_reduction(reduction);
     cudaStream_t cuda_stream = get_cuda_stream(stream);
 
-    // Chiama ncclAllReduce
     ncclResult_t status = ncclAllReduce(send_buf, recv_buf, count, nccl_dtype, nccl_op,
                                         nccl_comm_handle, cuda_stream);
     CCL_THROW_IF_NOT(status == ncclSuccess,
@@ -122,22 +131,17 @@ ccl::event nccl_comm::allreduce_impl(const void* send_buf,
 
     LOG_DEBUG("NCCL COMM: allreduce completed successfully");
 
-    // Ritorna un evento nativo
     return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
 }
 
-/* Helper: Estrai cudaStream_t da sycl::queue */
+/* extract cudaStream_t from SYCL queue */
 cudaStream_t nccl_comm::get_cuda_stream(const ccl::stream::impl_value_t& stream) {
 #if defined(CCL_ENABLE_SYCL)
     try {
-        // Ottieni la queue SYCL dallo stream CCL
         auto sycl_queue = stream->get_native_stream();
-
-        // Estrai il native handle CUDA
-        // Nota: questo richiede che DPC++ sia compilato con backend CUDA
         auto cuda_stream = sycl::get_native<sycl::backend::ext_oneapi_cuda>(sycl_queue);
 
-        LOG_DEBUG("NCCL COMM: Extracted CUDA stream: ", cuda_stream);
+        LOG_DEBUG("NCCL COMM: extracted CUDA stream: ", cuda_stream);
         return cuda_stream;
     }
     catch (const std::exception& e) {
@@ -148,7 +152,7 @@ cudaStream_t nccl_comm::get_cuda_stream(const ccl::stream::impl_value_t& stream)
 #endif
 }
 
-/* Helper: Converti ccl::datatype -> ncclDataType_t */
+/* convert ccl::datatype -> ncclDataType_t */
 ncclDataType_t nccl_comm::get_nccl_datatype(ccl::datatype dtype) {
     switch (dtype) {
         case ccl::datatype::int8:
@@ -176,7 +180,7 @@ ncclDataType_t nccl_comm::get_nccl_datatype(ccl::datatype dtype) {
     }
 }
 
-/* Helper: Converti ccl::reduction -> ncclRedOp_t */
+/* convert ccl::reduction -> ncclRedOp_t */
 ncclRedOp_t nccl_comm::get_nccl_reduction(ccl::reduction reduction) {
     switch (reduction) {
         case ccl::reduction::sum:
@@ -192,7 +196,7 @@ ncclRedOp_t nccl_comm::get_nccl_reduction(ccl::reduction reduction) {
     }
 }
 
-// Stub implementations per le altre collettive (lanciano eccezioni)
+// stub implementations for collectives not yet supported
 #define NCCL_COMM_STUB_IMPL(name) \
     CCL_THROW(#name " is not implemented for NCCL backend yet");
 
@@ -275,7 +279,7 @@ ccl::event nccl_comm::alltoall_impl(const void* send_buf,
                   ncclGetErrorString(version_status));
     }
 #endif
-    // Fallback: implementa alltoall con send/recv
+    // fallback: implement alltoall with send/recv inside a group
     LOG_DEBUG("NCCL COMM: using send/recv fallback implementation for alltoall");
     const size_t dtype_size = ccl::get_datatype_size(dtype);
     const size_t block_size = count * dtype_size;

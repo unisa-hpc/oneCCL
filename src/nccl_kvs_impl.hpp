@@ -1,3 +1,18 @@
+/*
+ Copyright 2016-2020 Intel Corporation
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+*/
 #pragma once
 
 #ifdef CCL_ENABLE_NCCL
@@ -12,28 +27,27 @@ namespace ccl {
 
 class nccl_kvs_impl : public base_kvs_impl {
 public:
-    // Costruttore per il rank 0 (main KVS) - genera l'ncclUniqueId
+    // constructor for rank 0 (main KVS) - generates the ncclUniqueId
     nccl_kvs_impl();
-    
-    // Costruttore per gli altri rank - riceve l'address con l'ncclUniqueId
+
+    // constructor for non-root ranks - receives the address containing ncclUniqueId
     nccl_kvs_impl(const kvs::address_type& addr);
-    
-    // Ottieni l'ncclUniqueId
+
     ncclUniqueId get_nccl_id() const;
-    
-    // get/set non servono per NCCL (il KVS è solo per distribuire l'ID)
+
+    // get/set are not needed for the NCCL backend (the KVS is only used to distribute the ID)
     vector_class<char> get(const string_class& key) override {
         CCL_THROW("get() is not needed for NCCL backend");
     }
-    
+
     void set(const string_class& key, const vector_class<char>& data) override {
         CCL_THROW("set() is not needed for NCCL backend");
     }
 
 private:
     ncclUniqueId nccl_id;
-    
-    // Helper per convertire ncclUniqueId <-> address_type
+
+    // helpers to convert between ncclUniqueId and address_type
     static kvs::address_type convert_id_to_addr(const ncclUniqueId& id);
     static ncclUniqueId convert_addr_to_id(const kvs::address_type& addr);
 };

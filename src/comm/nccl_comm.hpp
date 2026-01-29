@@ -65,7 +65,7 @@ public:
         return context_ptr;
     }
 
-    // Collectives operation declarations
+    // collective operation declarations
     ccl::event barrier(const ccl::stream::impl_value_t& stream,
                        const ccl::barrier_attr& attr,
                        const ccl::vector_class<ccl::event>& deps = {}) override {
@@ -76,7 +76,6 @@ public:
                             const ccl::barrier_attr& attr,
                             const ccl::vector_class<ccl::event>& deps = {});
 
-    // Dichiarazioni delle collettive (macro include allreduce_impl e altre)
     COMM_INTERFACE_COLL_DEFINITION__VOID_REQUIRED
 
     COMM_IMPL_DECLARATION_VOID_REQUIRED
@@ -90,13 +89,8 @@ private:
         return this;
     }
 
-    // Helper per estrarre cudaStream_t da sycl::queue
     cudaStream_t get_cuda_stream(const ccl::stream::impl_value_t& stream);
-
-    // Helper per convertire datatype CCL -> NCCL
     ncclDataType_t get_nccl_datatype(ccl::datatype dtype);
-
-    // Helper per convertire reduction CCL -> NCCL
     ncclRedOp_t get_nccl_reduction(ccl::reduction reduction);
 
     device_ptr_t device_ptr;
@@ -105,9 +99,9 @@ private:
     size_t comm_rank;
     size_t comm_size;
 
-    ncclComm_t nccl_comm_handle;
+    ncclComm_t nccl_comm_handle = nullptr;
 
-    // Mantieni il KVS per evitare early destruction
+    // while we only use the impl, keep the original object to avoid early destruction
     std::shared_ptr<ccl::kvs> kvs;
     const ccl::nccl_kvs_impl* kvs_impl;
 };
