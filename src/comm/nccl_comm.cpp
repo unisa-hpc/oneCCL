@@ -85,22 +85,20 @@ ccl::event nccl_comm::barrier_impl(const ccl::stream::impl_value_t& stream,
 
     cudaStream_t cuda_stream = get_cuda_stream(stream);
 
-    // ncclAllReduce requires device-accessible memory
-    int* d_dummy = nullptr;
-    cudaError_t cuda_err = cudaMalloc(&d_dummy, sizeof(int));
-    CCL_THROW_IF_NOT(cuda_err == cudaSuccess,
-                     "cudaMalloc for barrier dummy buffer failed: ", cudaGetErrorString(cuda_err));
+    // Allocate device memory via SYCL to avoid direct cudart link dependency
+    auto sycl_queue = stream->get_native_stream();
+    int* d_dummy = sycl::malloc_device<int>(1, sycl_queue);
+    CCL_THROW_IF_NOT(d_dummy != nullptr,
+                     "sycl::malloc_device for barrier dummy buffer failed");
 
-    cuda_err = cudaMemsetAsync(d_dummy, 0, sizeof(int), cuda_stream);
-    CCL_THROW_IF_NOT(cuda_err == cudaSuccess,
-                     "cudaMemsetAsync for barrier failed: ", cudaGetErrorString(cuda_err));
+    sycl_queue.memset(d_dummy, 0, sizeof(int)).wait();
 
     ncclResult_t status = ncclAllReduce(d_dummy, d_dummy, 1, ncclInt, ncclSum,
                                         nccl_comm_handle, cuda_stream);
 
-    // synchronize before freeing the buffer
-    cudaStreamSynchronize(cuda_stream);
-    cudaFree(d_dummy);
+    // synchronize and free
+    sycl_queue.wait();
+    sycl::free(d_dummy, sycl_queue);
 
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "NCCL barrier (allreduce) failed: ", ncclGetErrorString(status));
