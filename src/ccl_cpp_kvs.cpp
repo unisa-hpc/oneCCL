@@ -32,6 +32,9 @@
 #ifdef CCL_ENABLE_NCCL
 #include "nccl_kvs_impl.hpp"
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+#include "rccl_kvs_impl.hpp"
+#endif // CCL_ENABLE_RCCL
 
 namespace ccl {
 base_kvs_impl::base_kvs_impl(const kvs::address_type& addr) : addr(addr) {}
@@ -119,6 +122,11 @@ static base_kvs_impl* get_kvs_impl(const kvs::address_type& addr, const kvs_attr
         return new nccl_kvs_impl(addr);
     }
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    if (ccl::global_data::env().backend == backend_mode::rccl) {
+        return new rccl_kvs_impl(addr);
+    }
+#endif // CCL_ENABLE_RCCL
     return new native_kvs_impl(addr, attr);
 }
 
@@ -133,7 +141,12 @@ static base_kvs_impl* get_kvs_impl(const kvs_attr& attr) {
     if (ccl::global_data::env().backend == backend_mode::nccl) {
         return new nccl_kvs_impl();
     }
-#endif
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    if (ccl::global_data::env().backend == backend_mode::rccl) {
+        return new rccl_kvs_impl();
+    }
+#endif // CCL_ENABLE_RCCL
 
     return new native_kvs_impl(attr);
 }

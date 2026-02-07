@@ -66,8 +66,11 @@ std::map<backend_mode, std::string> env_data::backend_names = {
     std::make_pair(backend_mode::stub, "stub"),
 #endif // CCL_ENABLE_STUB_BACKEND
 #ifdef CCL_ENABLE_NCCL
-    std::make_pair(backend_mode::nccl, "nccl")
-#endif
+    std::make_pair(backend_mode::nccl, "nccl"),
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    std::make_pair(backend_mode::rccl, "rccl"),
+#endif // CCL_ENABLE_RCCL
 };
 
 std::map<process_launcher_mode, std::string> env_data::process_launcher_names = {
@@ -660,6 +663,9 @@ void env_data::parse() {
 #ifdef CCL_ENABLE_NCCL
     p.env_2_type(CCL_NCCL_LIBRARY_PATH, nccl_lib_path);
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    p.env_2_type(CCL_RCCL_LIBRARY_PATH, rccl_lib_path);
+#endif // CCL_ENABLE_RCCL
     p.env_2_type(CCL_OFI_LIBRARY_PATH, ofi_lib_path);
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)
@@ -1145,6 +1151,11 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
                       ": ",
                       (!nccl_lib_path.empty()) ? nccl_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    LOG_INFO_PROFILED(CCL_RCCL_LIBRARY_PATH,
+                      ": ",
+                      (!rccl_lib_path.empty()) ? rccl_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
+#endif // CCL_ENABLE_RCCL
     LOG_INFO_PROFILED(CCL_OFI_LIBRARY_PATH,
                       ": ",
                       (!ofi_lib_path.empty()) ? ofi_lib_path : CCL_ENV_STR_NOT_SPECIFIED);

@@ -37,6 +37,10 @@
 #include "comm/nccl_comm.hpp"
 #endif
 
+#ifdef CCL_ENABLE_RCCL
+#include "comm/rccl_comm.hpp"
+#endif
+
 #include "kvs_impl.hpp"
 
 namespace ccl {
@@ -108,6 +112,14 @@ comm_interface_ptr comm_selector::create_comm_impl(const size_t size,
     }
 #endif // CCL_ENABLE_NCCL
 
+#ifdef CCL_ENABLE_RCCL
+    // RCCL backend for AMD GPU
+    if (ccl::global_data::env().backend == backend_mode::rccl) {
+        return comm_interface_ptr(
+            ccl::rccl_comm::create(device, context, size, rank, std::move(kvs)));
+    }
+#endif // CCL_ENABLE_RCCL
+
     return comm_interface_ptr(
         ccl_comm::create(device, context, size, rank, std::move(kvs), internal_attr));
 }
@@ -167,6 +179,14 @@ comm_interface_ptr comm_selector::create_comm_implExt(const size_t size,
             ccl::nccl_comm::create(device, context, size, rank, std::move(kvs)));
     }
 #endif // CCL_ENABLE_NCCL
+
+#ifdef CCL_ENABLE_RCCL
+    // RCCL backend for AMD GPU
+    if (ccl::global_data::env().backend == backend_mode::rccl) {
+        return comm_interface_ptr(
+            ccl::rccl_comm::create(device, context, size, rank, std::move(kvs)));
+    }
+#endif // CCL_ENABLE_RCCL
 
     return comm_interface_ptr(ccl_comm::createExt(device, context, size, rank, kvs, internal_attr));
 }

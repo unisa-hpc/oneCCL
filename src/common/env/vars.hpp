@@ -1042,6 +1042,9 @@ constexpr const char* CCL_ATL_MPI_FP16 = "CCL_ATL_MPI_FP16";
 #ifdef CCL_ENABLE_NCCL
 constexpr const char* CCL_NCCL_LIBRARY_PATH = "CCL_NCCL_LIBRARY_PATH";
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+constexpr const char* CCL_RCCL_LIBRARY_PATH = "CCL_RCCL_LIBRARY_PATH";
+#endif // CCL_ENABLE_RCCL
 constexpr const char* CCL_OFI_LIBRARY_PATH = "CCL_OFI_LIBRARY_PATH";
 
 #ifdef CCL_ENABLE_SYCL

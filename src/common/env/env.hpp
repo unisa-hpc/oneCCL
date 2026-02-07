@@ -62,7 +62,10 @@ enum class backend_mode {
 #endif // CCL_ENABLE_STUB_BACKEND
 #ifdef CCL_ENABLE_NCCL
     nccl,
-#endif
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    rccl,
+#endif // CCL_ENABLE_RCCL
 };
 
 enum class process_launcher_mode {
@@ -326,6 +329,9 @@ public:
 #ifdef CCL_ENABLE_NCCL
     std::string nccl_lib_path;
 #endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    std::string rccl_lib_path;
+#endif // CCL_ENABLE_RCCL
     std::string ofi_lib_path;
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)
