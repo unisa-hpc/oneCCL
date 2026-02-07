@@ -129,6 +129,14 @@ if (CCL_ENABLE_NCCL)
     )
 endif(CCL_ENABLE_NCCL)
 
+if (CCL_ENABLE_RCCL)
+    list (APPEND EXTENSIONS_SRC
+        common/api_wrapper/rccl_api_wrapper.cpp
+        rccl_kvs_impl.cpp
+        comm/rccl_comm.cpp
+    )
+endif(CCL_ENABLE_RCCL)
+
 set(CCL_SRC
 
     atl/atl_base_comm.cpp

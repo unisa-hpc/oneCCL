@@ -57,3 +57,8 @@
 #ifndef CCL_ENABLE_NCCL
 #cmakedefine CCL_ENABLE_NCCL
 #endif
+
+/* RCCL support is configured by CMake (-DCCL_ENABLE_RCCL=ON) */
+#ifndef CCL_ENABLE_RCCL
+#cmakedefine CCL_ENABLE_RCCL
+#endif
