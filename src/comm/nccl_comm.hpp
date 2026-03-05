@@ -65,6 +65,8 @@ public:
         return context_ptr;
     }
 
+    ccl::event make_event(const ccl::stream::impl_value_t& stream);
+
     // collective operation declarations
     ccl::event barrier(const ccl::stream::impl_value_t& stream,
                        const ccl::barrier_attr& attr,

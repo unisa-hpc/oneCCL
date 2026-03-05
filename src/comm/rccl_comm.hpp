@@ -70,6 +70,8 @@ public:
     context_ptr_t get_context() const override {
         return context_ptr;
     }
+    
+    ccl::event make_event(const ccl::stream::impl_value_t& stream);
 
     // collective operation declarations
     ccl::event barrier(const ccl::stream::impl_value_t& stream,

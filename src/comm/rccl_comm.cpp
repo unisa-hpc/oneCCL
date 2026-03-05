@@ -82,6 +82,19 @@ rccl_comm* rccl_comm::create(device_t device,
     return new rccl_comm(device, context, size, rank, rccl_id, std::move(kvs_inst), kvs_impl);
 }
 
+/* create a ccl::event that tracks completion of all work submitted to the SYCL queue */
+ccl::event rccl_comm::make_event(const ccl::stream::impl_value_t& stream) {
+#if defined(CCL_ENABLE_SYCL)
+    auto sycl_queue = stream->get_native_stream();
+    sycl::event sycl_ev = sycl_queue.ext_oneapi_submit_barrier();
+    LOG_DEBUG("RCCL COMM: created SYCL barrier event for stream synchronization");
+    return ccl::event::create_from_native(sycl_ev);
+#else
+    LOG_DEBUG("RCCL COMM: SYCL not enabled, returning stub event");
+    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+#endif
+}
+
 /* barrier */
 ccl::event rccl_comm::barrier_impl(const ccl::stream::impl_value_t& stream,
                                    const ccl::barrier_attr& attr,
@@ -101,15 +114,16 @@ ccl::event rccl_comm::barrier_impl(const ccl::stream::impl_value_t& stream,
 
     ncclResult_t status = rcclAllReduce(d_dummy, d_dummy, 1, ncclInt, ncclSum,
                                         rccl_comm_handle, hip_stream);
-
-    // synchronize and free
-    sycl_queue.wait();
-    sycl::free(d_dummy, sycl_queue);
-
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "RCCL barrier (allreduce) failed: ", rcclGetErrorString(status));
 
-    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+    // Submit barrier to track completion, then synchronize before freeing
+    auto ev = make_event(stream);
+
+    sycl_queue.ext_oneapi_submit_barrier().wait();
+    sycl::free(d_dummy, sycl_queue);
+
+    return ev;
 }
 
 /* allreduce */
@@ -133,9 +147,9 @@ ccl::event rccl_comm::allreduce_impl(const void* send_buf,
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "rcclAllReduce failed: ", rcclGetErrorString(status));
 
-    LOG_DEBUG("RCCL COMM: allreduce completed successfully");
+    LOG_DEBUG("RCCL COMM: allreduce submitted successfully");
 
-    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+    return make_event(stream);
 }
 
 /* extract hipStream_t from SYCL queue */
@@ -272,7 +286,7 @@ ccl::event rccl_comm::alltoall_impl(const void* send_buf,
                 alltoall_fn(send_buf, recv_buf, count, rccl_dtype, rccl_comm_handle, hip_stream);
             CCL_THROW_IF_NOT(status == ncclSuccess,
                              "rcclAlltoAll failed: ", rcclGetErrorString(status));
-            return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+            return make_event(stream);
         }
         else {
             LOG_DEBUG("RCCL COMM: rcclAlltoAll symbol not found, fallback to send/recv");
@@ -320,7 +334,7 @@ ccl::event rccl_comm::alltoall_impl(const void* send_buf,
     CCL_THROW_IF_NOT(first_error == ncclSuccess,
                      "rcclAllToAll (send/recv) failed: ", rcclGetErrorString(first_error));
 
-    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+    return make_event(stream);
 }
 
 /* alltoallv */
@@ -401,7 +415,7 @@ ccl::event rccl_comm::recv_impl(void* recv_buf,
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "rcclRecv failed: ", rcclGetErrorString(status));
 
-    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+    return make_event(stream);
 }
 
 /* send */
@@ -423,7 +437,7 @@ ccl::event rccl_comm::send_impl(void* send_buf,
     CCL_THROW_IF_NOT(status == ncclSuccess,
                      "rcclSend failed: ", rcclGetErrorString(status));
 
-    return std::unique_ptr<ccl::event_impl>(new ccl::stub_event_impl());
+    return make_event(stream);
 }
 
 } // namespace ccl
