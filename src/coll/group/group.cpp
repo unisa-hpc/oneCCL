@@ -70,9 +70,13 @@ void group_impl::end() {
     }
 
 #ifdef CCL_ENABLE_SYCL
+#ifdef CCL_ENABLE_ZE
     auto store_ze_pt2pt_read = ccl::global_data::env().ze_pt2pt_read;
+#endif // CCL_ENABLE_ZE
     auto store_sycl_pt2pt_read = ccl::global_data::env().sycl_pt2pt_read;
+#ifdef CCL_ENABLE_ZE
     ccl::global_data::env().ze_pt2pt_read = 1;
+#endif // CCL_ENABLE_ZE
     ccl::global_data::env().sycl_pt2pt_read = 1;
 #endif
 
@@ -141,7 +145,9 @@ void group_impl::end() {
     }
 
 #ifdef CCL_ENABLE_SYCL
+#ifdef CCL_ENABLE_ZE
     ccl::global_data::env().ze_pt2pt_read = store_ze_pt2pt_read;
+#endif // CCL_ENABLE_ZE
     ccl::global_data::env().sycl_pt2pt_read = store_sycl_pt2pt_read;
 #endif
 

@@ -248,26 +248,78 @@ function(activate_compute_backend MODULES_PATH COMPUTE_BACKEND)
 
     if(COMPUTE_BACKEND STREQUAL "dpcpp")
         message ("COMPUTE_BACKEND=${COMPUTE_BACKEND} requested. Using DPC++ provider")
-        SET (COMPUTE_BACKEND_LOAD_MODULE "IntelSYCL_level_zero"
-                CACHE STRING
-             "COMPUTE_BACKEND=${COMPUTE_BACKEND} requested. Using DPC++ provider")
 
-        find_package(${COMPUTE_BACKEND_LOAD_MODULE} REQUIRED)
-
-        if(NOT IntelSYCL_level_zero_FOUND)
-            message(FATAL_ERROR "Failed to find IntelSYCL_level_zero")
+        # Mutual exclusion check: NCCL and RCCL cannot be enabled simultaneously
+        if(CCL_ENABLE_NCCL AND CCL_ENABLE_RCCL)
+            message(FATAL_ERROR "CCL_ENABLE_NCCL and CCL_ENABLE_RCCL cannot be enabled simultaneously. "
+                    "NCCL is for NVIDIA GPUs, RCCL is for AMD GPUs. Please enable only one.")
         endif()
 
-        # remember compilation flags, because flag required for OBJECTS target
-        # but if we use `target_link_libraries`, then these flags applied to all compiler options
-        # for c & cxx. But we need special flags for cxx only
-        # So set it manually
-        set (COMPUTE_BACKEND_CXXFLAGS_LOCAL "${COMPUTE_BACKEND_CXXFLAGS_LOCAL} ${INTEL_SYCL_FLAGS}")
+        # Choose the appropriate SYCL backend based on configuration
+        # If RCCL is enabled (AMD GPU target), use HIP backend
+        # If NCCL is enabled (NVIDIA GPU target), use CUDA backend
+        # Otherwise, use Level Zero backend (Intel GPU target)
+        if(CCL_ENABLE_RCCL)
+            message(STATUS "RCCL enabled - using SYCL with HIP/AMD backend")
+            SET (COMPUTE_BACKEND_LOAD_MODULE "IntelSYCL_hip"
+                    CACHE STRING
+                 "COMPUTE_BACKEND=${COMPUTE_BACKEND} requested. Using DPC++ with HIP backend" FORCE)
 
-        # remember current target for `target_link_libraries` in ccl
-        set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_level_zero)
-        set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_level_zero PARENT_SCOPE)
-        message (STATUS "COMPUTE_BACKEND_TARGET_NAME: ${COMPUTE_BACKEND_TARGET_NAME} requested. Using DPC++ provider")
+            find_package(${COMPUTE_BACKEND_LOAD_MODULE} REQUIRED)
+
+            if(NOT IntelSYCL_hip_FOUND)
+                message(FATAL_ERROR "Failed to find IntelSYCL_hip. Make sure ROCm/HIP toolkit is installed.")
+            endif()
+
+            # remember compilation flags for HIP backend
+            set (COMPUTE_BACKEND_CXXFLAGS_LOCAL "${COMPUTE_BACKEND_CXXFLAGS_LOCAL} ${INTEL_SYCL_FLAGS}")
+
+            # Set target for HIP backend
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_hip)
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_hip PARENT_SCOPE)
+            message (STATUS "COMPUTE_BACKEND_TARGET_NAME: ${COMPUTE_BACKEND_TARGET_NAME} requested. Using DPC++ with HIP provider")
+        elseif(CCL_ENABLE_NCCL)
+            message(STATUS "NCCL enabled - using SYCL with CUDA/NVIDIA backend")
+            SET (COMPUTE_BACKEND_LOAD_MODULE "IntelSYCL_cuda"
+                    CACHE STRING
+                 "COMPUTE_BACKEND=${COMPUTE_BACKEND} requested. Using DPC++ with CUDA backend" FORCE)
+
+            find_package(${COMPUTE_BACKEND_LOAD_MODULE} REQUIRED)
+
+            if(NOT IntelSYCL_cuda_FOUND)
+                message(FATAL_ERROR "Failed to find IntelSYCL_cuda. Make sure CUDA toolkit is installed.")
+            endif()
+
+            # remember compilation flags for CUDA backend
+            set (COMPUTE_BACKEND_CXXFLAGS_LOCAL "${COMPUTE_BACKEND_CXXFLAGS_LOCAL} ${INTEL_SYCL_FLAGS}")
+
+            # Set target for CUDA backend
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_cuda)
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_cuda PARENT_SCOPE)
+            message (STATUS "COMPUTE_BACKEND_TARGET_NAME: ${COMPUTE_BACKEND_TARGET_NAME} requested. Using DPC++ with CUDA provider")
+        else()
+            # Default: Use Level Zero backend for Intel GPUs
+            SET (COMPUTE_BACKEND_LOAD_MODULE "IntelSYCL_level_zero"
+                    CACHE STRING
+                 "COMPUTE_BACKEND=${COMPUTE_BACKEND} requested. Using DPC++ provider")
+
+            find_package(${COMPUTE_BACKEND_LOAD_MODULE} REQUIRED)
+
+            if(NOT IntelSYCL_level_zero_FOUND)
+                message(FATAL_ERROR "Failed to find IntelSYCL_level_zero")
+            endif()
+
+            # remember compilation flags, because flag required for OBJECTS target
+            # but if we use `target_link_libraries`, then these flags applied to all compiler options
+            # for c & cxx. But we need special flags for cxx only
+            # So set it manually
+            set (COMPUTE_BACKEND_CXXFLAGS_LOCAL "${COMPUTE_BACKEND_CXXFLAGS_LOCAL} ${INTEL_SYCL_FLAGS}")
+
+            # remember current target for `target_link_libraries` in ccl
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_level_zero)
+            set (COMPUTE_BACKEND_TARGET_NAME Intel::SYCL_level_zero PARENT_SCOPE)
+            message (STATUS "COMPUTE_BACKEND_TARGET_NAME: ${COMPUTE_BACKEND_TARGET_NAME} requested. Using DPC++ provider")
+        endif()
     endif()
 
     # extract target properties
@@ -326,11 +378,18 @@ function(set_compute_backend COMMON_CMAKE_DIR)
 
     if (${COMPUTE_BACKEND_TARGET_NAME} STREQUAL "Intel::SYCL" OR ${COMPUTE_BACKEND_TARGET_NAME} STREQUAL "Intel::SYCL_level_zero")
 
+        # Enable SYCL support - this is always required for dpcpp backend
         set(CCL_ENABLE_SYCL ON PARENT_SCOPE)
         message(STATUS "Enable CCL SYCL support")
 
-        set(CCL_ENABLE_ZE ON PARENT_SCOPE)
-        message(STATUS "Enable CCL Level Zero support")
+        # Only enable Level Zero if not explicitly disabled by user
+        # This allows NVIDIA GPU targets to use dpcpp without Level Zero
+        if (NOT DEFINED CCL_ENABLE_ZE OR CCL_ENABLE_ZE)
+            set(CCL_ENABLE_ZE ON PARENT_SCOPE)
+            message(STATUS "Enable CCL Level Zero support")
+        else()
+            message(STATUS "CCL Level Zero support disabled by user")
+        endif()
 
         set (CMAKE_CXX_FLAGS "-Wno-c++20-extensions" PARENT_SCOPE)
 
@@ -341,6 +400,80 @@ function(set_compute_backend COMMON_CMAKE_DIR)
             ERROR_STRIP_TRAILING_WHITESPACE
         )
         message(STATUS "DPC++ compiler version:\n" "${ICPX_VERSION}")
+    elseif (${COMPUTE_BACKEND_TARGET_NAME} STREQUAL "Intel::SYCL_cuda")
+        # CUDA/NVIDIA backend with SYCL
+        set(CCL_ENABLE_SYCL ON PARENT_SCOPE)
+        message(STATUS "Enable CCL SYCL support (CUDA backend)")
+
+        # Disable Level Zero for NVIDIA targets
+        set(CCL_ENABLE_ZE OFF PARENT_SCOPE)
+        message(STATUS "CCL Level Zero support disabled (using CUDA backend)")
+
+        set (CMAKE_CXX_FLAGS "-Wno-c++20-extensions" PARENT_SCOPE)
+
+        # Try to get DPC++ version
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version
+            OUTPUT_VARIABLE DPCPP_VERSION
+            ERROR_VARIABLE DPCPP_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        message(STATUS "DPC++ compiler version:\n" "${DPCPP_VERSION}")
+    elseif (${COMPUTE_BACKEND_TARGET_NAME} STREQUAL "Intel::SYCL_hip")
+        # HIP/AMD backend with SYCL
+        set(CCL_ENABLE_SYCL ON PARENT_SCOPE)
+        message(STATUS "Enable CCL SYCL support (HIP backend)")
+
+        # Disable Level Zero for AMD targets
+        set(CCL_ENABLE_ZE OFF PARENT_SCOPE)
+        message(STATUS "CCL Level Zero support disabled (using HIP backend)")
+
+        set (CMAKE_CXX_FLAGS "-Wno-c++20-extensions" PARENT_SCOPE)
+
+        # Try to get DPC++ version
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version
+            OUTPUT_VARIABLE DPCPP_VERSION
+            ERROR_VARIABLE DPCPP_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        message(STATUS "DPC++ compiler version:\n" "${DPCPP_VERSION}")
+    endif()
+
+    # Handle NCCL support when enabled
+    if (CCL_ENABLE_NCCL)
+        message(STATUS "NCCL support enabled for NVIDIA GPU collective operations")
+
+        # Add NCCL compile definition
+        add_definitions(-DCCL_ENABLE_NCCL)
+
+        # The CUDA and NCCL libraries are already found and linked via FindIntelSYCL_cuda.cmake
+        # Additional NCCL-specific configuration can be added here
+        if(NCCL_FOUND)
+            message(STATUS "NCCL library successfully configured")
+            set(CCL_NCCL_FOUND TRUE PARENT_SCOPE)
+        else()
+            message(WARNING "NCCL requested but library not found. Some features may be unavailable.")
+            set(CCL_NCCL_FOUND FALSE PARENT_SCOPE)
+        endif()
+    endif()
+
+    # Handle RCCL support when enabled
+    if (CCL_ENABLE_RCCL)
+        message(STATUS "RCCL support enabled for AMD GPU collective operations")
+
+        # Add RCCL compile definition
+        add_definitions(-DCCL_ENABLE_RCCL)
+
+        # The HIP and RCCL libraries are already found and linked via FindIntelSYCL_hip.cmake
+        # Additional RCCL-specific configuration can be added here
+        if(RCCL_FOUND)
+            message(STATUS "RCCL library successfully configured")
+            set(CCL_RCCL_FOUND TRUE PARENT_SCOPE)
+        else()
+            message(WARNING "RCCL requested but library not found. Some features may be unavailable.")
+            set(CCL_RCCL_FOUND FALSE PARENT_SCOPE)
+        endif()
     endif()
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMPUTE_BACKEND_FLAGS}")
@@ -349,6 +482,7 @@ function(set_compute_backend COMMON_CMAKE_DIR)
     set (COMPUTE_BACKEND_TARGET_NAME ${COMPUTE_BACKEND_TARGET_NAME} PARENT_SCOPE)
     set (COMPUTE_BACKEND_FLAGS ${COMPUTE_BACKEND_FLAGS} PARENT_SCOPE)
     set (COMPUTE_BACKEND_LIBRARIES ${COMPUTE_BACKEND_LIBRARIES} PARENT_SCOPE)
+    set (COMPUTE_BACKEND_INCLUDE_DIRS ${COMPUTE_BACKEND_INCLUDE_DIRS} PARENT_SCOPE)
     set (COMPUTE_BACKEND_FLAGS ${COMPUTE_BACKEND_FLAGS} PARENT_SCOPE)
 endfunction(set_compute_backend)
 

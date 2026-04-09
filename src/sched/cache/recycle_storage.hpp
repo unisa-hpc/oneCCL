@@ -35,21 +35,25 @@ public:
     void recycle_events(size_t threshold = 0, size_t limit = 0);
     void recycle_requests(size_t threshold = 0, size_t limit = 0);
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     void store_events(ze::dynamic_event_pool* pool,
                       const std::shared_ptr<sycl::event>& sync_event,
                       const std::shared_ptr<sycl::event>& output_event);
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
+#ifdef CCL_ENABLE_SYCL
     void store_request(ccl_request* request);
 #endif // CCL_ENABLE_SYCL
 
 private:
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     std::list<ze::dynamic_event_pool*> ze_pools;
     std::list<std::shared_ptr<sycl::event>> sync_sycl_events;
     std::list<std::shared_ptr<sycl::event>> output_sycl_events;
+    std::mutex lock_events;
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
+#ifdef CCL_ENABLE_SYCL
     std::list<ccl_request*> requests;
     const size_t critical_threshold = 1000;
-    std::mutex lock_events;
     std::mutex lock_requests;
 #endif // CCL_ENABLE_SYCL
 };

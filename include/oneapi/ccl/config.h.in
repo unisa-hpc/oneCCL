@@ -37,7 +37,28 @@
 #cmakedefine CCL_PRODUCT_BUILD_DATE "@CCL_PRODUCT_BUILD_DATE@"
 #cmakedefine CCL_PRODUCT_FULL       "@CCL_PRODUCT_FULL@"
 
-#if defined(SYCL_LANGUAGE_VERSION) && defined (__INTEL_LLVM_COMPILER)
+/* Enable SYCL support for:
+ * 1. Intel oneAPI DPC++ compiler (__INTEL_LLVM_COMPILER)
+ * 2. Open-source Intel LLVM/DPC++ compiler (clang with SYCL_LANGUAGE_VERSION)
+ */
+#if defined(SYCL_LANGUAGE_VERSION)
+#if defined(__INTEL_LLVM_COMPILER) || defined(__clang__)
 #define CCL_ENABLE_SYCL
+/* Only enable Level Zero for Intel compiler by default.
+ * For open-source DPC++ with NVIDIA backend, CCL_ENABLE_ZE should be
+ * controlled via CMake (-DCCL_ENABLE_ZE=OFF) */
+#if defined(__INTEL_LLVM_COMPILER)
 #define CCL_ENABLE_ZE
+#endif
+#endif
+#endif
+
+/* NCCL support is configured by CMake (-DCCL_ENABLE_NCCL=ON) */
+#ifndef CCL_ENABLE_NCCL
+#cmakedefine CCL_ENABLE_NCCL
+#endif
+
+/* RCCL support is configured by CMake (-DCCL_ENABLE_RCCL=ON) */
+#ifndef CCL_ENABLE_RCCL
+#cmakedefine CCL_ENABLE_RCCL
 #endif

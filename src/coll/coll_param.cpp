@@ -282,6 +282,7 @@ bool ccl_coll_param::is_inplace(buf_type type) const {
                                           get_send_count(),
                                           recv_buf_ptr,
                                           recv_counts.data(),
+                                          nullptr,
                                           dtype.size(),
                                           comm->rank(),
                                           comm->size());

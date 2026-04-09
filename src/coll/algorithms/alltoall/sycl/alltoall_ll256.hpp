@@ -186,7 +186,7 @@ sycl::event arc_ll256_alltoall(const void *src,
 
         size_t alltoall_loop_buf_offset = ccl::global_data::env().sycl_tmp_buf_size / 2;
 
-        h.parallel_for(
+        h.template parallel_for<class oneccl_arc_ll256_alltoall>(
             sycl::nd_range<1>(g_sz, l_sz),
             [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SZ)]] {
                 int idx = 0;

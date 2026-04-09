@@ -20,6 +20,9 @@
 #include "coll/algorithms/utils/tvisa/include/gen_visa_templates.hpp"
 #include "coll/algorithms/utils/transmit/transmit.hpp"
 
+template <typename T, template <typename, int> class Proto, int SubGroupSize>
+class oneccl_reduce_scatter_pcie {};
+
 template <typename T,
           template <typename, int>
           class Proto,
@@ -106,7 +109,8 @@ struct ReduceScatter : public Transmit<T, Proto, SubGroupSize> {
         done = true;
 
         e = queue.submit([&](sycl::handler& cgh) {
-            cgh.parallel_for(offload.getLaunchParam(step), offload);
+            cgh.parallel_for<class oneccl_reduce_scatter_pcie<T, Proto, SubGroupSize>>(
+                offload.getLaunchParam(step), offload);
         });
         return e;
     }

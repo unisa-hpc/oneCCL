@@ -212,6 +212,9 @@ void inline copy_vec(const void* in,
 
 // single kernel with sycl::vec
 template <typename T, int vec_size, int SGS>
+class oneccl_transposeT {};
+
+template <typename T, int vec_size, int SGS>
 sycl::event transposeT(sycl::queue& q,
                        const void* send_buf,
                        void* out_buf,
@@ -230,15 +233,16 @@ sycl::event transposeT(sycl::queue& q,
     int kernel_size = (kernel_threads + wg_size - 1) / wg_size * wg_size;
     e = q.submit([=](sycl::handler& h) {
         h.depends_on(dep_events);
-        h.parallel_for(sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
-            const size_t idx = it.get_global_linear_id();
-            if (idx >= kernel_threads)
-                return;
-            int a = idx / vec_count;
-            int b = idx % vec_count;
-            int a_from = pred_loc(a, nodes, ppn);
-            copy_vec<T, vec_size>(send_buf, out_buf, a, b, a_from, recv_count, displ, block_count);
-        });
+        h.parallel_for<oneccl_transposeT<T, vec_size, SGS>>(
+            sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
+                const size_t idx = it.get_global_linear_id();
+                if (idx >= kernel_threads)
+                    return;
+                int a = idx / vec_count;
+                int b = idx % vec_count;
+                int a_from = pred_loc(a, nodes, ppn);
+                copy_vec<T, vec_size>(send_buf, out_buf, a, b, a_from, recv_count, displ, block_count);
+            });
     });
     return e;
 }

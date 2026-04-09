@@ -713,6 +713,8 @@ inline sycl::event submit_wait_on_events(sycl::queue q, const std::vector<sycl::
     }
 }
 
+template <typename data_type>
+class oneccl_sycl_check_nan {};
 // helper function to check NAN or INF numbers in the input buffer
 template <typename data_type>
 sycl::event sycl_check_nan(sycl::queue &queue,
@@ -725,26 +727,27 @@ sycl::event sycl_check_nan(sycl::queue &queue,
     int nthreads = (count + wg_size - 1) / wg_size * wg_size;
     auto e = queue.submit([&](sycl::handler &cgh) {
         cgh.depends_on(deps);
-        cgh.parallel_for(sycl::nd_range<1>(nthreads, wg_size), [=](sycl::nd_item<1> idx2) {
-            uint32_t idx = idx2.get_global_id();
-            if (idx >= count)
-                return;
-            data_type *in = (data_type *)in_buffer;
-            bool has_inf = false;
-            if (std::numeric_limits<data_type>::has_infinity) {
-                has_inf = in[idx] == std::numeric_limits<data_type>::infinity() ||
-                          -in[idx] == std::numeric_limits<data_type>::infinity();
-            }
-            if (in[idx] != in[idx] || has_inf) {
-                sycl::_V1::ext::oneapi::experimental::printf(
-                    "[%d] NAN error %s: idx:%d count: %d val: %f \n",
-                    rank,
-                    str,
-                    idx,
-                    count,
-                    in[idx]);
-            }
-        });
+        cgh.parallel_for<oneccl_sycl_check_nan<data_type>>(
+            sycl::nd_range<1>(nthreads, wg_size), [=](sycl::nd_item<1> idx2) {
+                uint32_t idx = idx2.get_global_id();
+                if (idx >= count)
+                    return;
+                data_type *in = (data_type *)in_buffer;
+                bool has_inf = false;
+                if (std::numeric_limits<data_type>::has_infinity) {
+                    has_inf = in[idx] == std::numeric_limits<data_type>::infinity() ||
+                              -in[idx] == std::numeric_limits<data_type>::infinity();
+                }
+                if (in[idx] != in[idx] || has_inf) {
+                    sycl::_V1::ext::oneapi::experimental::printf(
+                        "[%d] NAN error %s: idx:%d count: %d val: %f \n",
+                        rank,
+                        str,
+                        idx,
+                        count,
+                        in[idx]);
+                }
+            });
     });
     return e;
 }

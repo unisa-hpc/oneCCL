@@ -53,7 +53,7 @@ struct impl_dispatch {
 // ccl_comm_env
 
 ccl_comm_env::ccl_comm_env(std::shared_ptr<ccl::device> device) : device(device) {
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     enable_topo_algo = ccl::global_data::env().enable_topo_algo;
     ze_copy_engine = ccl::global_data::env().ze_copy_engine;
     ze_h2d_copy_engine = ccl::global_data::env().ze_h2d_copy_engine;
@@ -75,21 +75,21 @@ ccl_comm_env::ccl_comm_env(std::shared_ptr<ccl::device> device) : device(device)
         ze_copy_engine = ccl::ze::copy_engine_mode::none;
         ze_h2d_copy_engine = ccl::ze::h2d_copy_engine_mode::none;
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 }
 
 std::string ccl_comm_env::to_string() const {
     std::stringstream ss;
     ss << "{";
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     if (device) {
         ss << " enable_topo_algo: " << enable_topo_algo;
         ss << ", ze_copy_engine: " << ccl::ze::copy_engine_names[ze_copy_engine];
         ss << ", ze_h2d_copy_engine: " << ccl::ze::h2d_copy_engine_names[ze_h2d_copy_engine];
         ss << " ";
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     ss << "}";
 
@@ -186,6 +186,7 @@ void ccl_comm::init(int comm_id,
             ccl::stream op_stream = ccl::create_stream(q);
             ccl::impl_dispatch disp;
             ccl_stream* cclstream = get_stream_ptr(disp(op_stream));
+            LOG_DEBUG("invoking multi-process path");
             coll_init(this, cclstream);
         }
     }
@@ -316,16 +317,52 @@ ccl_comm* ccl_comm::create_subcomm(int color, int key) const {
 
 ccl_comm* ccl_comm::create_subcomm_split_independent(int color, int key) {
     std::shared_ptr<atl_base_comm> new_atl_comm = get_atl_comm()->comm_split(color, key);
-    ccl_comm* comm = new ccl_comm();
+
+    // Create communicator with is_sub_communicator=true initially so that init()
+    // doesn't try to initialize topo_manager with nullptr device_ptr
+    ccl_comm* comm = new ccl_comm(new_atl_comm->get_comm_id(),
+                                  new_atl_comm,
+                                  true /*share_resources*/,
+                                  true /*is_sub_communicator*/);
+
+    // Copy device and context pointers from parent
     comm->device_ptr = this->device_ptr;
     comm->context_ptr = this->context_ptr;
 
-    // is_sub_communicator is set to false because the function is creating a new communicator
-    // that is not a sub-communicator. This means that the new communicator will have its own
-    // topology manager and subcommunicators, and it will not inherit these from the parent
-    // communicator. This is necessary to ensure that the new communicator is fully independent.
-    comm->init(
-        new_atl_comm->get_comm_id(), new_atl_comm, true /*share_resources*/, false /*subcomm*/);
+    // Now initialize topo_manager and create topo sub-communicators for the split comm
+    // These will be properly sized for the split group (not inherited from parent)
+    comm->topo_manager.init(new_atl_comm, comm->device_ptr, comm->context_ptr);
+    if (!comm->rank() && comm->device_ptr) {
+        LOG_INFO("split comm topo_manager:", comm->topo_manager.to_string());
+    }
+    comm->create_topo_subcomms(new_atl_comm);
+
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
+    // Initialize IPC exchange mode based on new node_comm
+    if (comm->node_comm) {
+        comm->init_ipc_exchange_mode(comm->node_comm);
+    }
+
+    // Initialize pattern_counter for SYCL kernels
+    for (int i = 0; i < ARC_MAX_NUM + 1; i++) {
+        comm->pattern_counter[i] = 0xa770;
+    }
+
+    // Initialize SYCL kernel buffers and do IPC exchange for the split communicator
+    if (ccl::global_data::env().enable_sycl_kernels && comm->device_ptr != NULL) {
+        sycl::queue q(comm->device_ptr->get_native());
+        if (q.get_context().get_backend() == sycl::backend::ext_oneapi_level_zero) {
+            ccl::stream op_stream = ccl::create_stream(q);
+            ccl::impl_dispatch disp;
+            ccl_stream* cclstream = get_stream_ptr(disp(op_stream));
+            LOG_DEBUG("invoking coll_init for split comm");
+            coll_init(comm, cclstream);
+        }
+    }
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
+
+    // Inherit environment settings
+    comm->env = this->env;
 
     LOG_DEBUG("Base rank: ",
               get_atl_comm()->get_rank(),
@@ -572,9 +609,11 @@ void* ccl_scaleout_host_bufs::get_scaleout_host_buf() {
         }
         CCL_THROW_IF_NOT(host_bufs[index] != nullptr, "Cannot allocate host buffer");
 
+#ifdef CCL_ENABLE_ZE
         if (global_data.ze_data->external_pointer_registration_enabled) {
             global_data.ze_data->import_external_pointer(host_bufs[index], buf_size);
         }
+#endif // CCL_ENABLE_ZE
     }
 
     auto old_index = index;
@@ -599,9 +638,11 @@ ccl_scaleout_host_bufs::~ccl_scaleout_host_bufs() {
     try {
         for (int i = 0; i < buf_count; ++i) {
             if (host_bufs[i] != nullptr) {
+#ifdef CCL_ENABLE_ZE
                 if (ccl::global_data::get().ze_data->external_pointer_registration_enabled) {
                     ccl::global_data::get().ze_data->release_imported_pointer(host_bufs[i]);
                 }
+#endif // CCL_ENABLE_ZE
 
                 switch (ccl::global_data::env().sycl_scaleout_buf_alloc_mode) {
                     case ccl::utils::alloc_mode::hwloc:
@@ -774,12 +815,14 @@ void ccl_scaleout_pipeline_bufs::allocate_pipe_chunks(int num_bufs) {
     }
     CCL_THROW_IF_NOT(send_pipe_buffer, "malloc send_pipe_buffer failed");
     CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc recv_pipe_buffer failed");
+#ifdef CCL_ENABLE_ZE
     if (global_data.ze_data->external_pointer_registration_enabled) {
         global_data.ze_data->import_external_pointer(send_pipe_buffer,
                                                      num_chunk_buffs * max_chunk_size);
         global_data.ze_data->import_external_pointer(recv_pipe_buffer,
                                                      num_chunk_buffs * max_chunk_size);
     }
+#endif // CCL_ENABLE_ZE
     for (int i = 0; i < num_chunk_buffs; i++) {
         send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
         recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;
@@ -791,10 +834,12 @@ ccl_scaleout_pipeline_bufs::~ccl_scaleout_pipeline_bufs() {
         return;
     try {
         auto& global_data = ccl::global_data::get();
+#ifdef CCL_ENABLE_ZE
         if (global_data.ze_data->external_pointer_registration_enabled) {
             global_data.ze_data->release_imported_pointer(send_pipe_buffer);
             global_data.ze_data->release_imported_pointer(recv_pipe_buffer);
         }
+#endif // CCL_ENABLE_ZE
         switch (ccl::global_data::env().sycl_scaleout_buf_alloc_mode) {
             case ccl::utils::alloc_mode::hwloc: {
                 // fallback to memalign if worker_affinity is not set by user
@@ -831,8 +876,10 @@ ccl_scaleout_pipeline_bufs::ccl_scaleout_pipeline_bufs(const ccl_scaleout_pipeli
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(send_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(send_pipe_buffer, other.send_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(send_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
@@ -846,8 +893,10 @@ ccl_scaleout_pipeline_bufs::ccl_scaleout_pipeline_bufs(const ccl_scaleout_pipeli
             CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc scaleout_device_buf failed");
         }
         std::memcpy(recv_pipe_buffer, other.recv_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(recv_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;
@@ -877,8 +926,10 @@ ccl_scaleout_pipeline_bufs& ccl_scaleout_pipeline_bufs::operator=(
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(send_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(send_pipe_buffer, other.send_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(send_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             send_pipe_chunks[i] = (char*)send_pipe_buffer + i * max_chunk_size;
@@ -890,8 +941,10 @@ ccl_scaleout_pipeline_bufs& ccl_scaleout_pipeline_bufs::operator=(
             CCL_MALLOC(num_chunk_buffs * max_chunk_size, "ccl_scaleout_pipeline_bufs");
         CCL_THROW_IF_NOT(recv_pipe_buffer, "malloc scaleout_device_buf failed");
         std::memcpy(recv_pipe_buffer, other.recv_pipe_buffer, num_chunk_buffs * max_chunk_size);
+#ifdef CCL_ENABLE_ZE
         ccl::global_data::get().ze_data->import_external_pointer(recv_pipe_buffer,
                                                                  num_chunk_buffs * max_chunk_size);
+#endif // CCL_ENABLE_ZE
 
         for (int i = 0; i < num_chunk_buffs; i++) {
             recv_pipe_chunks[i] = (char*)recv_pipe_buffer + i * max_chunk_size;

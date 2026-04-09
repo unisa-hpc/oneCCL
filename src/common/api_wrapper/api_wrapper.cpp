@@ -23,6 +23,12 @@
 #if defined(CCL_ENABLE_MPI)
 #include "common/api_wrapper/mpi_api_wrapper.hpp"
 #endif //CCL_ENABLE_MPI
+#if defined(CCL_ENABLE_NCCL)
+#include "common/api_wrapper/nccl_api_wrapper.hpp"
+#endif //CCL_ENABLE_NCCL
+#if defined(CCL_ENABLE_RCCL)
+#include "common/api_wrapper/rccl_api_wrapper.hpp"
+#endif //CCL_ENABLE_RCCL
 #include "common/api_wrapper/ofi_api_wrapper.hpp"
 #include "common/api_wrapper/openmp_wrapper.hpp"
 
@@ -30,7 +36,8 @@
 
 namespace ccl {
 
-void api_wrappers_init() {
+
+void api_wrappers_init() {  
     bool ofi_inited = true, mpi_inited = true;
     if (!(ofi_inited = ofi_api_init())) {
         LOG_INFO("could not initialize OFI api");
@@ -40,6 +47,16 @@ void api_wrappers_init() {
         LOG_INFO("could not initialize MPI api");
     }
 #endif //CCL_ENABLE_MPI
+#if defined(CCL_ENABLE_NCCL)
+    if (!nccl_api_init()) {
+        LOG_INFO("could not initialize NCCL api");
+    }
+#endif //CCL_ENABLE_NCCL
+#if defined(CCL_ENABLE_RCCL)
+    if (!rccl_api_init()) {
+        LOG_INFO("could not initialize RCCL api");
+    }
+#endif //CCL_ENABLE_RCCL
     CCL_THROW_IF_NOT(ofi_inited || mpi_inited, "could not initialize any transport library");
     if (!ofi_inited && (ccl::global_data::env().atl_transport == ccl_atl_ofi)) {
         ccl::global_data::env().atl_transport = ccl_atl_mpi;
@@ -96,11 +113,18 @@ void api_wrappers_init() {
 #endif // CCL_ENABLE_MPI && CCL_ENABLE_OMP
 }
 
+
 void api_wrappers_fini() {
     ofi_api_fini();
 #if defined(CCL_ENABLE_MPI)
     mpi_api_fini();
 #endif //CCL_ENABLE_MPI
+#if defined(CCL_ENABLE_NCCL)
+    nccl_api_fini();
+#endif //CCL_ENABLE_NCCL
+#if defined(CCL_ENABLE_RCCL)
+    rccl_api_fini();
+#endif //CCL_ENABLE_RCCL
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     ze_api_fini();
 #if defined(CCL_ENABLE_UMF)
@@ -111,6 +135,7 @@ void api_wrappers_fini() {
     openmp_api_fini();
 #endif // CCL_ENABLE_MPI && CCL_ENABLE_OMP
 }
+
 
 int load_library(lib_info_t& info) {
     // Check if the path to the library passed in info is correct

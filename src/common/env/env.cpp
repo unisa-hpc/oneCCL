@@ -63,8 +63,14 @@ std::map<ccl_staging_buffer, std::string> env_data::staging_buffer_names = {
 std::map<backend_mode, std::string> env_data::backend_names = {
     std::make_pair(backend_mode::native, "native"),
 #ifdef CCL_ENABLE_STUB_BACKEND
-    std::make_pair(backend_mode::stub, "stub")
+    std::make_pair(backend_mode::stub, "stub"),
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+    std::make_pair(backend_mode::nccl, "nccl"),
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    std::make_pair(backend_mode::rccl, "rccl"),
+#endif // CCL_ENABLE_RCCL
 };
 
 std::map<process_launcher_mode, std::string> env_data::process_launcher_names = {
@@ -200,6 +206,15 @@ env_data::env_data()
           sycl_allgatherv_scaleout_algo("auto"),
           sycl_allgatherv_ll_threshold(2048),
           sycl_allgatherv_scaleout_overlap(1),
+          // sycl_allgatherv_scaleout_comm_size sets the maximum size of scaleout communicator
+          // this variable is introduced for development reasons
+          // CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE=0 allgatherv always falls back to schedule mode
+          // CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE=<size_t max_number> allgatherv always runs in SYCL mode
+          sycl_allgatherv_scaleout_comm_size(8),
+          // experimentally we found out that having a smaller host buffer that
+          // is essential for direct algorithm, makes the algo run more iterations
+          // that drives overlapping and we can see a performance improvement
+          sycl_allgatherv_overlap_buf_size(134217728),
 
           sycl_broadcast_tmp_buf(0),
           sycl_broadcast_small_threshold(524288),
@@ -257,9 +272,9 @@ env_data::env_data()
           process_launcher(process_launcher_mode::hydra),
 
           enable_topo_algo(1),
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
           topo_color(topo_color_mode::ze),
-#else // CCL_ENABLE_SYCL
+#else // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
           topo_color(topo_color_mode::fixed),
 #endif // CCL_ENABLE_SYCL
           enable_p2p_access(CCL_ENV_INT_NOT_SPECIFIED),
@@ -302,7 +317,9 @@ env_data::env_data()
 
           sync_barrier(0),
           sync_deps(0),
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
           enable_ze_barrier(0),
           enable_ze_bidir_algo(1),
           enable_ze_cache(1),
@@ -355,7 +372,7 @@ env_data::env_data()
           drmfd_dev_render_dir_path("/dev/dri/by-path/"),
           drmfd_dev_render_suffix("-render"),
 #endif // CCL_ENABLE_DRM
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
           ipc_allgatherv_wa(1),
 
 #ifdef CCL_ENABLE_PMIX
@@ -573,6 +590,8 @@ void env_data::parse() {
     p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT, sycl_allgatherv_scaleout_algo);
     p.env_2_type(CCL_SYCL_ALLGATHERV_LL_THRESHOLD, sycl_allgatherv_ll_threshold);
     p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT_OVERLAP, sycl_allgatherv_scaleout_overlap);
+    p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE, sycl_allgatherv_scaleout_comm_size);
+    p.env_2_type(CCL_SYCL_ALLGATHERV_OVERLAP_BUF_SIZE, sycl_allgatherv_overlap_buf_size);
 
     p.env_2_type(CCL_SYCL_BROADCAST_TMP_BUF, sycl_broadcast_tmp_buf);
     p.env_2_type(CCL_SYCL_BROADCAST_SMALL_THRESHOLD, sycl_broadcast_small_threshold);
@@ -652,6 +671,12 @@ void env_data::parse() {
     p.env_2_type(CCL_ATL_MPI_BF16, mpi_bf16_native);
     p.env_2_type(CCL_ATL_MPI_FP16, mpi_fp16_native);
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    p.env_2_type(CCL_NCCL_LIBRARY_PATH, nccl_lib_path);
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    p.env_2_type(CCL_RCCL_LIBRARY_PATH, rccl_lib_path);
+#endif // CCL_ENABLE_RCCL
     p.env_2_type(CCL_OFI_LIBRARY_PATH, ofi_lib_path);
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)
@@ -712,7 +737,9 @@ void env_data::parse() {
 
     p.env_2_type(CCL_BARRIER_SYNC, sync_barrier);
     p.env_2_type(CCL_ZE_DEPS_SYNC, sync_deps);
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     p.env_2_type(CCL_ZE_BARRIER, enable_ze_barrier);
     p.env_2_type(CCL_ZE_BIDIR_ALGO, enable_ze_bidir_algo);
     p.env_2_type(CCL_ZE_CACHE, enable_ze_cache);
@@ -781,7 +808,7 @@ void env_data::parse() {
     p.env_2_enum(CCL_ZE_TYPE2_TUNE_PORTS, type2_tune_mode_names, type2_mode);
     p.env_2_type(CCL_DRMFD_DEV_RENDER_DIR_PATH, drmfd_dev_render_dir_path);
     p.env_2_type(CCL_DRMFD_DEV_RENDER_SUFFIX, drmfd_dev_render_suffix);
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     p.env_2_type(CCL_IPC_ALLGATHERV_WA, ipc_allgatherv_wa);
 
 #ifdef CCL_ENABLE_PMIX
@@ -1130,6 +1157,16 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
                       ": ",
                       (!mpi_lib_path.empty()) ? mpi_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    LOG_INFO_PROFILED(CCL_NCCL_LIBRARY_PATH,
+                      ": ",
+                      (!nccl_lib_path.empty()) ? nccl_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    LOG_INFO_PROFILED(CCL_RCCL_LIBRARY_PATH,
+                      ": ",
+                      (!rccl_lib_path.empty()) ? rccl_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
+#endif // CCL_ENABLE_RCCL
     LOG_INFO_PROFILED(CCL_OFI_LIBRARY_PATH,
                       ": ",
                       (!ofi_lib_path.empty()) ? ofi_lib_path : CCL_ENV_STR_NOT_SPECIFIED);
@@ -1173,7 +1210,9 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
     LOG_INFO_PROFILED(CCL_BARRIER_SYNC, ": ", sync_barrier);
     LOG_INFO_PROFILED(CCL_ZE_DEPS_SYNC, ": ", sync_deps);
     LOG_INFO_PROFILED(CCL_USE_HMEM, ": ", use_hmem);
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     LOG_INFO_PROFILED(CCL_ZE_BARRIER, ": ", enable_ze_barrier);
     LOG_INFO_PROFILED(CCL_ZE_BIDIR_ALGO, ": ", enable_ze_bidir_algo);
     LOG_INFO_PROFILED(CCL_ZE_CACHE, ": ", enable_ze_cache);
@@ -1226,7 +1265,7 @@ void env_data::print(int rank, bool is_profile_mode, bool is_mt_enabled) {
     LOG_INFO_PROFILED(CCL_ZE_TYPE2_TUNE_PORTS, ": ", str_by_enum(type2_tune_mode_names, type2_mode));
     LOG_INFO_PROFILED(CCL_DRMFD_DEV_RENDER_DIR_PATH, ": ", drmfd_dev_render_dir_path);
     LOG_INFO_PROFILED(CCL_DRMFD_DEV_RENDER_SUFFIX, ": ", drmfd_dev_render_suffix);
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     LOG_INFO_PROFILED(CCL_IPC_ALLGATHERV_WA, ": ", ipc_allgatherv_wa);
 
 #ifdef CCL_ENABLE_PMIX

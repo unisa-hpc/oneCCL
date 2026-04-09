@@ -20,6 +20,23 @@
 #include "common/global/global.hpp"
 #include "common/log/log.hpp"
 
+template <typename DataType, size_t vec_size, size_t N_RANKS>
+class oneccl_alltoall_write_aligned {};
+template <typename DataType, size_t vec_size, size_t N_RANKS>
+class oneccl_alltoall_read_aligned {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_write_peel_front {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_write_aligned_main {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_write_peel_back {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_read_peel_front {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_read_aligned_main {};
+template <typename DataType, size_t vec_size, bool is_multi_thread, size_t N_RANKS>
+class oneccl_alltoall_read_peel_back {};
+
 static size_t get_alignment_bytes(size_t min_alignment_bytes) {
     size_t alignment_bytes = ccl::global_data::env().kernel_mem_align;
 
@@ -128,16 +145,18 @@ std::vector<sycl::event> alltoall_vec_write_aligned(
         cgh.depends_on(dep);
         // start and end are properly aligned, the internals are a multiple of sycl_vec size
         // therefore, there is no remainder to handle
-        cgh.parallel_for(sycl::range<1>(per_rank_count / vec_size), [=](sycl::id<1> idx) {
-            size_t start_idx = idx * vec_size;
+        cgh.parallel_for<oneccl_alltoall_write_aligned<DataType, vec_size, N_RANKS>>(
+            sycl::range<1>(per_rank_count / vec_size), [=](sycl::id<1> idx) {
+                size_t start_idx = idx * vec_size;
 #pragma unroll
-            for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                sycl::vec<DataType, vec_size> data = *static_cast<sycl::vec<DataType, vec_size> *>(
-                    (void *)&send_bufs[rank][buffer_index * per_rank_count + start_idx]);
-                *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
-                    &recv_bufs[buffer_index][rank * per_rank_count + start_idx]) = data;
-            }
-        });
+                for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                    sycl::vec<DataType, vec_size> data =
+                        *static_cast<sycl::vec<DataType, vec_size> *>(
+                            (void *)&send_bufs[rank][buffer_index * per_rank_count + start_idx]);
+                    *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
+                        &recv_bufs[buffer_index][rank * per_rank_count + start_idx]) = data;
+                }
+            });
     }) };
 }
 
@@ -154,17 +173,18 @@ std::vector<sycl::event> alltoall_vec_read_aligned(sycl::queue &queue,
         cgh.depends_on(dep);
         // start and end are properly aligned, the internals are a multiple of sycl_vec size
         // therefore, there is no remainder to handle
-        cgh.parallel_for(sycl::range<1>(per_rank_count / vec_size), [=](sycl::id<1> idx) {
-            size_t start_idx = idx * vec_size;
+        cgh.parallel_for<oneccl_alltoall_read_aligned<DataType, vec_size, N_RANKS>>(
+            sycl::range<1>(per_rank_count / vec_size), [=](sycl::id<1> idx) {
+                size_t start_idx = idx * vec_size;
 #pragma unroll
-            for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                sycl::vec<DataType, vec_size> data = *static_cast<sycl::vec<DataType, vec_size> *>(
-                    (void *)&send_bufs[buffer_index][rank * per_rank_count + start_idx]);
-
-                *static_cast<sycl::vec<DataType, vec_size> *>(
-                    (void *)&recv_bufs[rank][buffer_index * per_rank_count + start_idx]) = data;
-            }
-        });
+                for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                    sycl::vec<DataType, vec_size> data =
+                        *static_cast<sycl::vec<DataType, vec_size> *>(
+                            (void *)&send_bufs[buffer_index][rank * per_rank_count + start_idx]);
+                    *static_cast<sycl::vec<DataType, vec_size> *>(
+                        (void *)&recv_bufs[rank][buffer_index * per_rank_count + start_idx]) = data;
+                }
+            });
     }) };
 }
 
@@ -302,68 +322,72 @@ std::vector<sycl::event> alltoall_vec_write(sycl::queue &queue,
         if (max_peel_loop_count > 0) {
             events.push_back(queue.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
-                cgh.parallel_for(sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_peel_front<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel front
-                        size_t start_send = buffer_index * per_rank_count;
-                        size_t start_recv = rank * per_rank_count;
-
-                        // both accesses unaligned, copy element-by-element
-                        if (idx < peel_front_count[buffer_index]) {
-                            DataType data = send_bufs[rank][start_send + idx];
-                            recv_bufs[buffer_index][start_recv + idx] = data;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel front
+                            size_t start_send = buffer_index * per_rank_count;
+                            size_t start_recv = rank * per_rank_count;
+                            // both accesses unaligned, copy element-by-element
+                            if (idx < peel_front_count[buffer_index]) {
+                                DataType data = send_bufs[rank][start_send + idx];
+                                recv_bufs[buffer_index][start_recv + idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }));
         }
 
         if (aligned_loop_count > 0) {
             events.push_back(queue.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
-                cgh.parallel_for(sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_aligned_main<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // handle aligned data
-                        size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
-                        size_t start_send_idx = buffer_index * per_rank_count + start_idx;
-                        size_t recv_idx = rank * per_rank_count + start_idx;
-                        // the read operation (local) might be unaligned
-                        // read element-by-element into sycl::vec
-                        sycl::vec<DataType, vec_size> data;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // handle aligned data
+                            size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
+                            size_t start_send_idx = buffer_index * per_rank_count + start_idx;
+                            size_t recv_idx = rank * per_rank_count + start_idx;
+                            // the read operation (local) might be unaligned
+                            // read element-by-element into sycl::vec
+                            sycl::vec<DataType, vec_size> data;
 #pragma unroll
-                        for (size_t i = 0; i < vec_size; ++i) {
-                            data[i] = send_bufs[rank][start_send_idx + i];
+                            for (size_t i = 0; i < vec_size; ++i) {
+                                data[i] = send_bufs[rank][start_send_idx + i];
+                            }
+                            // write operation (remote) is aligned
+                            *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
+                                &recv_bufs[buffer_index][recv_idx]) = data;
                         }
-                        // write operation (remote) is aligned
-                        *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
-                            &recv_bufs[buffer_index][recv_idx]) = data;
-                    }
-                });
+                    });
             }));
         }
 
         if (end_loop_count > 0) {
             events.push_back(queue.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
-                cgh.parallel_for(sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_peel_back<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel back
-                        size_t start_idx =
-                            peel_front_count[buffer_index] + aligned_loop_count * vec_size;
-                        size_t start_send = buffer_index * per_rank_count;
-                        size_t start_recv = rank * per_rank_count;
-
-                        size_t loop_idx = start_idx + idx;
-                        // both accesses unaligned, copy element-by-element
-                        if (loop_idx < per_rank_count) {
-                            DataType data = send_bufs[rank][start_send + loop_idx];
-                            recv_bufs[buffer_index][start_recv + loop_idx] = data;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel back
+                            size_t start_idx =
+                                peel_front_count[buffer_index] + aligned_loop_count * vec_size;
+                            size_t start_send = buffer_index * per_rank_count;
+                            size_t start_recv = rank * per_rank_count;
+                            size_t loop_idx = start_idx + idx;
+                            // both accesses unaligned, copy element-by-element
+                            if (loop_idx < per_rank_count) {
+                                DataType data = send_bufs[rank][start_send + loop_idx];
+                                recv_bufs[buffer_index][start_recv + loop_idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }));
         }
 
@@ -378,66 +402,71 @@ std::vector<sycl::event> alltoall_vec_write(sycl::queue &queue,
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_peel_front<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel front
-                        size_t start_send = buffer_index * per_rank_count;
-                        size_t start_recv = rank * per_rank_count;
-
-                        // both accesses unaligned, copy element-by-element
-                        if (idx < peel_front_count[buffer_index]) {
-                            DataType data = send_bufs[rank][start_send + idx];
-                            recv_bufs[buffer_index][start_recv + idx] = data;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel front
+                            size_t start_send = buffer_index * per_rank_count;
+                            size_t start_recv = rank * per_rank_count;
+                            // both accesses unaligned, copy element-by-element
+                            if (idx < peel_front_count[buffer_index]) {
+                                DataType data = send_bufs[rank][start_send + idx];
+                                recv_bufs[buffer_index][start_recv + idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }),
             out_of_order_q.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_aligned_main<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // handle aligned data
-                        size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
-                        size_t start_send_idx = buffer_index * per_rank_count + start_idx;
-                        size_t recv_idx = rank * per_rank_count + start_idx;
-                        // the read operation (local) might be unaligned
-                        // read element-by-element into sycl::vec
-                        sycl::vec<DataType, vec_size> data;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // handle aligned data
+                            size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
+                            size_t start_send_idx = buffer_index * per_rank_count + start_idx;
+                            size_t recv_idx = rank * per_rank_count + start_idx;
+                            // the read operation (local) might be unaligned
+                            // read element-by-element into sycl::vec
+                            sycl::vec<DataType, vec_size> data;
 #pragma unroll
-                        for (size_t i = 0; i < vec_size; ++i) {
-                            data[i] = send_bufs[rank][start_send_idx + i];
+                            for (size_t i = 0; i < vec_size; ++i) {
+                                data[i] = send_bufs[rank][start_send_idx + i];
+                            }
+                            // write operation (remote) is aligned
+                            *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
+                                &recv_bufs[buffer_index][recv_idx]) = data;
                         }
-                        // write operation (remote) is aligned
-                        *(sycl::vec<DataType, vec_size> *)static_cast<void *>(
-                            &recv_bufs[buffer_index][recv_idx]) = data;
-                    }
-                });
+                    });
             }),
             out_of_order_q.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_write_peel_back<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel back
-                        size_t start_idx =
-                            peel_front_count[buffer_index] + aligned_loop_count * vec_size;
-                        size_t start_send = buffer_index * per_rank_count;
-                        size_t start_recv = rank * per_rank_count;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel back
+                            size_t start_idx =
+                                peel_front_count[buffer_index] + aligned_loop_count * vec_size;
+                            size_t start_send = buffer_index * per_rank_count;
+                            size_t start_recv = rank * per_rank_count;
 
-                        size_t loop_idx = start_idx + idx;
-                        // both accesses unaligned, copy element-by-element
-                        if (loop_idx < per_rank_count) {
-                            DataType data = send_bufs[rank][start_send + loop_idx];
-                            recv_bufs[buffer_index][start_recv + loop_idx] = data;
+                            size_t loop_idx = start_idx + idx;
+                            // both accesses unaligned, copy element-by-element
+                            if (loop_idx < per_rank_count) {
+                                DataType data = send_bufs[rank][start_send + loop_idx];
+                                recv_bufs[buffer_index][start_recv + loop_idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }),
         };
     }
@@ -503,20 +532,22 @@ std::vector<sycl::event> alltoall_vec_read(sycl::queue &queue,
         if (max_peel_loop_count > 0) {
             events.push_back(queue.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
-                cgh.parallel_for(sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_read_peel_front<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel front
-                        size_t start_recv = buffer_index * per_rank_count;
-                        size_t start_send = rank * per_rank_count;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel front
+                            size_t start_recv = buffer_index * per_rank_count;
+                            size_t start_send = rank * per_rank_count;
 
-                        // both accesses unaligned, copy element-by-element
-                        if (idx < peel_front_count[buffer_index]) {
-                            DataType data = send_bufs[buffer_index][start_send + idx];
-                            recv_bufs[rank][start_recv + idx] = data;
+                            // both accesses unaligned, copy element-by-element
+                            if (idx < peel_front_count[buffer_index]) {
+                                DataType data = send_bufs[buffer_index][start_send + idx];
+                                recv_bufs[rank][start_recv + idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }));
         }
 
@@ -525,49 +556,52 @@ std::vector<sycl::event> alltoall_vec_read(sycl::queue &queue,
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_read_aligned_main<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // handle aligned data
-                        size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
-                        size_t start_recv_idx = buffer_index * per_rank_count + start_idx;
-                        size_t send_idx = rank * per_rank_count + start_idx;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // handle aligned data
+                            size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
+                            size_t start_recv_idx = buffer_index * per_rank_count + start_idx;
+                            size_t send_idx = rank * per_rank_count + start_idx;
 
-                        // the read operation (remote) is aligned
-                        sycl::vec<DataType, vec_size> data =
-                            *static_cast<sycl::vec<DataType, vec_size> *>(
-                                (void *)&send_bufs[buffer_index][send_idx]);
+                            // the read operation (remote) is aligned
+                            sycl::vec<DataType, vec_size> data =
+                                *static_cast<sycl::vec<DataType, vec_size> *>(
+                                    (void *)&send_bufs[buffer_index][send_idx]);
                         // write operation (local) might be unaligned
                         // write element-by-element from sycl::vec
 #pragma unroll
-                        for (size_t i = 0; i < vec_size; ++i) {
-                            recv_bufs[rank][start_recv_idx + i] = data[i];
+                            for (size_t i = 0; i < vec_size; ++i) {
+                                recv_bufs[rank][start_recv_idx + i] = data[i];
+                            }
                         }
-                    }
-                });
+                    });
             }));
         }
 
         if (end_loop_count > 0) {
             events.push_back(queue.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
-                cgh.parallel_for(sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<oneccl_alltoall_read_peel_back<DataType, vec_size, true, N_RANKS>>(
+                    sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel back
-                        size_t start_idx =
-                            peel_front_count[buffer_index] + aligned_loop_count * vec_size;
-                        size_t start_recv = buffer_index * per_rank_count;
-                        size_t start_send = rank * per_rank_count;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel back
+                            size_t start_idx =
+                                peel_front_count[buffer_index] + aligned_loop_count * vec_size;
+                            size_t start_recv = buffer_index * per_rank_count;
+                            size_t start_send = rank * per_rank_count;
 
-                        size_t loop_idx = start_idx + idx;
-                        // both accesses unaligned, copy element-by-element
-                        if (loop_idx < per_rank_count) {
-                            DataType data = send_bufs[buffer_index][start_send + loop_idx];
-                            recv_bufs[rank][start_recv + loop_idx] = data;
+                            size_t loop_idx = start_idx + idx;
+                            // both accesses unaligned, copy element-by-element
+                            if (loop_idx < per_rank_count) {
+                                DataType data = send_bufs[buffer_index][start_send + loop_idx];
+                                recv_bufs[rank][start_recv + loop_idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }));
         }
 
@@ -582,67 +616,73 @@ std::vector<sycl::event> alltoall_vec_read(sycl::queue &queue,
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_read_peel_front<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(max_peel_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel front
-                        size_t start_recv = buffer_index * per_rank_count;
-                        size_t start_send = rank * per_rank_count;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel front
+                            size_t start_recv = buffer_index * per_rank_count;
+                            size_t start_send = rank * per_rank_count;
 
-                        // both accesses unaligned, copy element-by-element
-                        if (idx < peel_front_count[buffer_index]) {
-                            DataType data = send_bufs[buffer_index][start_send + idx];
-                            recv_bufs[rank][start_recv + idx] = data;
+                            // both accesses unaligned, copy element-by-element
+                            if (idx < peel_front_count[buffer_index]) {
+                                DataType data = send_bufs[buffer_index][start_send + idx];
+                                recv_bufs[rank][start_recv + idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }),
             out_of_order_q.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_read_aligned_main<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(aligned_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // handle aligned data
-                        size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
-                        size_t start_recv_idx = buffer_index * per_rank_count + start_idx;
-                        size_t send_idx = rank * per_rank_count + start_idx;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // handle aligned data
+                            size_t start_idx = idx * vec_size + peel_front_count[buffer_index];
+                            size_t start_recv_idx = buffer_index * per_rank_count + start_idx;
+                            size_t send_idx = rank * per_rank_count + start_idx;
 
-                        // the read operation (remote) is aligned
-                        sycl::vec<DataType, vec_size> data =
-                            *static_cast<sycl::vec<DataType, vec_size> *>(
-                                (void *)&send_bufs[buffer_index][send_idx]);
+                            // the read operation (remote) is aligned
+                            sycl::vec<DataType, vec_size> data =
+                                *static_cast<sycl::vec<DataType, vec_size> *>(
+                                    (void *)&send_bufs[buffer_index][send_idx]);
                     // write operation (local) might be unaligned
                     // write element-by-element from sycl::vec
 #pragma unroll
-                        for (size_t i = 0; i < vec_size; ++i) {
-                            recv_bufs[rank][start_recv_idx + i] = data[i];
+                            for (size_t i = 0; i < vec_size; ++i) {
+                                recv_bufs[rank][start_recv_idx + i] = data[i];
+                            }
                         }
-                    }
-                });
+                    });
             }),
             out_of_order_q.submit([&](sycl::handler &cgh) {
                 cgh.depends_on(dep);
                 // start and end are properly aligned, the internals are a multiple of sycl_vec size
                 // therefore, there is no remainder to handle
-                cgh.parallel_for(sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
+                cgh.parallel_for<
+                    oneccl_alltoall_read_peel_back<DataType, vec_size, false, N_RANKS>>(
+                    sycl::range<1>(end_loop_count), [=](sycl::id<1> idx) {
 #pragma unroll
-                    for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
-                        // peel back
-                        size_t start_idx =
-                            peel_front_count[buffer_index] + aligned_loop_count * vec_size;
-                        size_t start_recv = buffer_index * per_rank_count;
-                        size_t start_send = rank * per_rank_count;
+                        for (size_t buffer_index = 0; buffer_index < N_RANKS; ++buffer_index) {
+                            // peel back
+                            size_t start_idx =
+                                peel_front_count[buffer_index] + aligned_loop_count * vec_size;
+                            size_t start_recv = buffer_index * per_rank_count;
+                            size_t start_send = rank * per_rank_count;
 
-                        size_t loop_idx = start_idx + idx;
-                        // both accesses unaligned, copy element-by-element
-                        if (loop_idx < per_rank_count) {
-                            DataType data = send_bufs[buffer_index][start_send + loop_idx];
-                            recv_bufs[rank][start_recv + loop_idx] = data;
+                            size_t loop_idx = start_idx + idx;
+                            // both accesses unaligned, copy element-by-element
+                            if (loop_idx < per_rank_count) {
+                                DataType data = send_bufs[buffer_index][start_send + loop_idx];
+                                recv_bufs[rank][start_recv + loop_idx] = data;
+                            }
                         }
-                    }
-                });
+                    });
             }),
         };
     }

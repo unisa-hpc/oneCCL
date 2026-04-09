@@ -79,7 +79,7 @@
 #include "coll/algorithms/send/sycl/send_sycl.hpp"
 #endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
-#if defined(CCL_ENABLE_SYCL)
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
 #define CCL_THROW_RECORDING(stream, ...) \
     do { \
         if (use_recording_path((stream))) { \
@@ -220,7 +220,7 @@ static ccl_request* ccl_coll_create(ccl_coll_param& param, const ccl_coll_attr& 
         attr.synchronous = 1;
     }
 
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     LOG_DEBUG("\n{\n",
               "  param: ",
@@ -440,14 +440,14 @@ static ccl_request* ccl_coll_create(ccl_coll_param& param, const ccl_coll_attr& 
         auto wait_result = ccl_wait_impl<ccl_sched>(data.executor.get(), request);
         CCL_THROW_IF_NOT(wait_result != ccl_wait_result_completed_released,
                          "internal error, valid request was released");
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
         if ((ccl::utils::should_use_sycl_output_event(param.stream) || is_queue_in_order) &&
             sched->coll_param.comm->get_env()->get_enable_topo_algo()) {
             request->set_native_event(request->get_sync_event());
         }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     }
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     else if ((ccl::utils::should_use_sycl_output_event(param.stream) || is_queue_in_order) &&
              sched->coll_param.comm->get_env()->get_enable_topo_algo()) {
         LOG_DEBUG("waiting for sched ", sched, " to be submitted_to_gpu");
@@ -463,7 +463,7 @@ static ccl_request* ccl_coll_create(ccl_coll_param& param, const ccl_coll_attr& 
             request->set_native_event(request->get_sync_event());
         }
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
 #ifdef CCL_ENABLE_ITT
     ccl::profile::itt::task_end();

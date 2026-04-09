@@ -19,6 +19,15 @@
 #include "coll/algorithms/utils/sycl_kernels.hpp"
 #include "coll/algorithms/utils/sycl_coll_base.hpp"
 
+template <typename T, int vec_size, int N>
+class oneccl_reduce_scatter_large_read {};
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_reduce_scatter_large_prologue {};
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_reduce_scatter_large_main {};
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_reduce_scatter_large_epilogue {};
+
 template <typename T, int N, int vec_size>
 sycl::event reduce_scatter_large_read_invoke(std::array<void *, MAX_NODE_RANKS> send_bufs,
                                              void *recv_buf,
@@ -41,7 +50,7 @@ sycl::event reduce_scatter_large_read_invoke(std::array<void *, MAX_NODE_RANKS> 
         ccl_comm_barrier_data dummy_cbd = comm->barrier_data();
         const size_t kernel_threads = count / vec_size + count % vec_size;
         const size_t kernel_size = ((kernel_threads + work_group_size - 1) / work_group_size) * work_group_size;
-        h.parallel_for(
+        h.parallel_for<oneccl_reduce_scatter_large_read<T, vec_size, N>>(
             sycl::nd_range<1>(kernel_size, work_group_size),
             [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size)]] {
                 reduce_base<T, N, vec_size, 1, 0, 0>(
@@ -284,8 +293,10 @@ ccl::event reduce_scatter_large_impl(const void *send_buf,
                 const size_t kernel_size =
                     ((kernel_threads + work_group_size_cp - 1) / work_group_size_cp) * work_group_size_cp;
                 h.depends_on(dep_events);
+                constexpr int prologue_chunk_id = NE * 1000 + NP * 100 + 10;
 
-                h.parallel_for(
+                h.parallel_for<
+                    oneccl_reduce_scatter_large_prologue<T, use_full_vector, vec_size, N, prologue_chunk_id>>(
                     sycl::nd_range<1>(kernel_size, work_group_size_cp),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size_cp)]] {
                         // copy first chunk from send buf to tmp buf
@@ -331,8 +342,9 @@ ccl::event reduce_scatter_large_impl(const void *send_buf,
 
             ccl_kernel_barrier_data dummy_kbd;
             ccl_comm_barrier_data dummy_cbd = node_comm->barrier_data();
+            constexpr int main_chunk_id = NE * 1000 + NP * 100;
 
-            h.parallel_for(
+            h.parallel_for<oneccl_reduce_scatter_large_main<T, use_full_vector, vec_size, N, main_chunk_id>>(
                 sycl::nd_range<1>(kernel_size, work_group_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size)]] {
                     read_reduce_write<T, N, vec_size>(l_mdfi_send_ptrs,
@@ -394,8 +406,10 @@ ccl::event reduce_scatter_large_impl(const void *send_buf,
 
             work_event = q_use.submit([=](sycl::handler &h) {
                 h.depends_on(work_event);
+                constexpr int epilogue_chunk_id = NE * 1000 + NP * 100 + 2;
 
-                h.parallel_for(
+                h.parallel_for<
+                    oneccl_reduce_scatter_large_epilogue<T, use_full_vector, vec_size, N, epilogue_chunk_id>>(
                     sycl::nd_range<1>(kernel_size, work_group_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size)]] {
                         reduce_base<T, N, vec_size, 1, 0, 0>(nullptr,

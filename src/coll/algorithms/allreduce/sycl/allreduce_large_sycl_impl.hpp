@@ -19,6 +19,37 @@
 #include "common/global/global.hpp"
 #include "coll/algorithms/utils/sycl_kernels.hpp"
 
+// Kernel name templates for allreduce_large
+template <typename T, int vec_size, int NE, int N>
+class oneccl_allreduce_large_rw_ipc {};
+
+template <typename T, int vec_size, int NE, int N>
+class oneccl_allreduce_large_rw_tmp {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_prologue {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_main {};
+
+template <typename T, bool use_full_vector, int vec_size, int N>
+class oneccl_allreduce_large_rem {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_allgatherv {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_epilogue_reduce {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_epilogue_rw {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_epilogue_copy {};
+
+template <typename T, bool use_full_vector, int vec_size, int N, int chunk_idx = 0>
+class oneccl_allreduce_large_final_rw {};
+
 template <typename T, int N, int vec_size>
 ccl::event allreduce_large_read_write_ipc(const void *send_buf,
                                           void *recv_buf,
@@ -90,7 +121,7 @@ ccl::event allreduce_large_read_write_ipc(const void *send_buf,
         const size_t kernel_size =
             ((kernel_threads + work_group_size - 1) / work_group_size) * work_group_size;
 
-        h.parallel_for(
+        h.parallel_for<oneccl_allreduce_large_rw_ipc<T, vec_size, N, N>>(
             sycl::nd_range<1>(kernel_size, work_group_size),
             [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size)]] {
                 reduce_base<T, N, vec_size, 1, 0, 0, 0>(nullptr,
@@ -223,7 +254,7 @@ ccl::event allreduce_large_read_write_tmp(const void *send_buf,
             const size_t kernel_size =
                 ((kernel_threads + work_group_size - 1) / work_group_size) * work_group_size;
 
-            h.parallel_for(
+            h.parallel_for<oneccl_allreduce_large_rw_tmp<T, vec_size, N, N>>(
                 sycl::nd_range<1>(kernel_size, work_group_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sub_group_size)]] {
                     reduce_base<T, N, vec_size, 1, 0, 0, 0>(nullptr,
@@ -503,7 +534,9 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
                 std::array<void *, MAX_GPUS> l_send_buf_pack_ptr;
                 l_send_buf_pack_ptr[0] = (char *)send_buf + pack_count * dsize;
-                h.parallel_for(
+                constexpr int chunk_id = NE * 1000 + NP * 100 + 10;
+                h.parallel_for<
+                    oneccl_allreduce_large_prologue<T, use_full_vector, vec_size, N, chunk_id>>(
                     sycl::nd_range<1>(kernel_size, work_group_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                         if (!reduce_has_pre_operation) {
@@ -583,8 +616,10 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
             ccl_kernel_barrier_data dummy_kbd;
             ccl_comm_barrier_data dummy_cbd = node_comm->barrier_data();
+            constexpr int main_chunk_id = NE * 1000 + NP * 100;
 
-            h.parallel_for(
+            h.parallel_for<
+                oneccl_allreduce_large_main<T, use_full_vector, vec_size, N, main_chunk_id>>(
                 sycl::nd_range<1>(kernel_size, work_group_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                     read_reduce_write<T, N, vec_size>(l_mdfi_send_ptrs,
@@ -661,8 +696,13 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
             work_event = q_use.submit([=](sycl::handler &h) {
                 h.depends_on(work_event);
+                constexpr int allgatherv_chunk_id = NE * 1000 + NP * 100 + 1;
 
-                h.parallel_for(
+                h.parallel_for<oneccl_allreduce_large_allgatherv<T,
+                                                                 use_full_vector,
+                                                                 vec_size,
+                                                                 N,
+                                                                 allgatherv_chunk_id>>(
                     sycl::nd_range<1>(kernel_size, work_group_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                         read_write<T, N, vec_size>(l_xelink_work_rd_ptrs_prev,
@@ -717,8 +757,13 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
             work_event = q_use.submit([=](sycl::handler &h) {
                 h.depends_on(work_event);
+                constexpr int epilogue_reduce_chunk_id = NE * 1000 + NP * 100 + 2;
 
-                h.parallel_for(
+                h.parallel_for<oneccl_allreduce_large_epilogue_reduce<T,
+                                                                      use_full_vector,
+                                                                      vec_size,
+                                                                      N,
+                                                                      epilogue_reduce_chunk_id>>(
                     sycl::nd_range<1>(kernel_size, work_group_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                         reduce_base<T, N, vec_size, 1, 0, 0>(nullptr,
@@ -739,8 +784,13 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
                 work_event = q_use.submit([=](sycl::handler &h) {
                     h.depends_on(work_event);
+                    constexpr int epilogue_rw_chunk_id = NE * 1000 + NP * 100 + 3;
 
-                    h.parallel_for(
+                    h.parallel_for<oneccl_allreduce_large_epilogue_rw<T,
+                                                                      use_full_vector,
+                                                                      vec_size,
+                                                                      N,
+                                                                      epilogue_rw_chunk_id>>(
                         sycl::nd_range<1>(kernel_size_rw, work_group_size),
                         [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                             read_write<T, N, vec_size>(l_xelink_work_rd_ptrs,
@@ -762,8 +812,14 @@ ccl::event allreduce_large_impl(const void *send_buf,
                     work_event = invoke_barrier(node_comm, q_use, { work_event }, is_cpu_barrier);
                     work_event = q_use.submit([=](sycl::handler &h) {
                         h.depends_on(work_event);
+                        constexpr int epilogue_copy_chunk_id = NE * 1000 + NP * 100 + 4;
 
-                        h.parallel_for(
+                        h.parallel_for<
+                            oneccl_allreduce_large_epilogue_copy<T,
+                                                                 use_full_vector,
+                                                                 vec_size,
+                                                                 N,
+                                                                 epilogue_copy_chunk_id>>(
                             sycl::nd_range<1>(kernel_size, work_group_size),
                             [=](sycl::nd_item<1> it)
                                 [[sycl::reqd_sub_group_size(work_group_size)]] {
@@ -794,8 +850,13 @@ ccl::event allreduce_large_impl(const void *send_buf,
 
         work_event = q.submit([=](sycl::handler &h) {
             h.depends_on(work_event);
+            constexpr int final_rw_chunk_id = NE * 1000 + NP * 100 + 5;
 
-            h.parallel_for(
+            h.parallel_for<oneccl_allreduce_large_final_rw<T,
+                                                           use_full_vector,
+                                                           vec_size,
+                                                           N,
+                                                           final_rw_chunk_id>>(
                 sycl::nd_range<1>(kernel_size, work_group_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(work_group_size)]] {
                     read_write<T, N, vec_size>(l_peer_even_ptrs,

@@ -94,8 +94,12 @@ copy_entry::copy_entry(ccl_sched* sched,
     }
 
 #ifdef CCL_ENABLE_SYCL
+#ifdef CCL_ENABLE_ZE
     else if (sched->coll_param.stream->get_backend() != ccl::utils::get_level_zero_backend() ||
              is_sycl_buf) {
+#else // CCL_ENABLE_ZE
+    else if (true) {
+#endif // CCL_ENABLE_ZE
         ctype = copy_type::sycl;
         if (!is_sycl_buf) {
             if ((in_ptr_type != sycl::usm::alloc::device) &&

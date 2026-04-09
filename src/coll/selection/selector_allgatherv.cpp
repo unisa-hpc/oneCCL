@@ -69,9 +69,9 @@ bool ccl_algorithm_selector_helper<ccl_coll_allgatherv_algo>::can_use(
     }
     else if (algo == ccl_coll_allgatherv_direct && param.is_scaleout &&
              ccl::global_data::env().worker_count > 1
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
              && ccl::global_data::env().ze_multi_workers
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     ) {
         // MLSL-1757: scale-up topo + scale-out direct combination hangs
         // for CCL_ZE_MULTI_WORKERS=1 + CC_WORKER_COUNT > 1 cases

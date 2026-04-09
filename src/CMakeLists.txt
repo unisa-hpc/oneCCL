@@ -50,7 +50,6 @@ if (CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
 
         common/global/ze/ze_data.cpp
         common/global/ze/ze_fd_manager.cpp
-        common/utils/sycl_utils.cpp
         common/api_wrapper/ze_api_wrapper.cpp
 
         sched/ze/ze_event_manager.cpp
@@ -114,6 +113,29 @@ if (CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
         )
     endif(ENABLE_UMF)
 endif(CCL_ENABLE_SYCL AND CCL_ENABLE_ZE)
+
+# SYCL-only sources (no ZE dependency)
+if (CCL_ENABLE_SYCL)
+    list (APPEND EXTENSIONS_SRC
+        common/utils/sycl_utils.cpp
+    )
+endif(CCL_ENABLE_SYCL)
+
+if (CCL_ENABLE_NCCL)
+    list (APPEND EXTENSIONS_SRC
+        common/api_wrapper/nccl_api_wrapper.cpp
+        nccl_kvs_impl.cpp
+        comm/nccl_comm.cpp
+    )
+endif(CCL_ENABLE_NCCL)
+
+if (CCL_ENABLE_RCCL)
+    list (APPEND EXTENSIONS_SRC
+        common/api_wrapper/rccl_api_wrapper.cpp
+        rccl_kvs_impl.cpp
+        comm/rccl_comm.cpp
+    )
+endif(CCL_ENABLE_RCCL)
 
 set(CCL_SRC
 
@@ -385,7 +407,7 @@ target_include_directories(ccl-objects PRIVATE ${SRC_INCLUDE_DIRS})
 target_include_directories(ccl-objects SYSTEM PRIVATE ${SRC_SYSTEM_INCLUDE_DIRS})
 
 if (COMPUTE_BACKEND_TARGET_NAME)
-    target_include_directories(ccl-objects PUBLIC ${INTERFACE_INCLUDE_DIRECTORIES})
+    target_include_directories(ccl-objects PUBLIC ${COMPUTE_BACKEND_INCLUDE_DIRS})
 endif()
 
 # shared library

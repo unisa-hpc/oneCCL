@@ -113,6 +113,8 @@ static inline void recv_reduce_copy_send(sycl::sub_group &sg,
 #endif
 }
 
+class oneccl_arc_ll256_allreduce {};
+
 sycl::event arc_ll256_allreduce(const void *src,
                                 void *dst,
                                 size_t count,
@@ -174,6 +176,11 @@ sycl::event arc_ll256_allreduce(const void *src,
 
     /* To avoid pattern not changed when "iters" is 1 */
     pattern_t pattern_prefix = ++pattern_counter << 16;
+
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(
+            &ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
+    }
 
     sycl_e = q.submit([&](auto &h) {
         //using namespace sycl::ext::intel::experimental::esimd;
@@ -239,7 +246,7 @@ sycl::event arc_ll256_allreduce(const void *src,
 
         //sycl::ext::oneapi::experimental::printf("------> rank: %d, group num: %ld, loop count: %zu\n", local_world_rank, g_sz / l_sz, iters);
 
-        h.parallel_for(
+        h.template parallel_for<oneccl_arc_ll256_allreduce>(
             sycl::nd_range<1>(g_sz, l_sz),
             [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SZ)]] {
                 int idx = 0;
@@ -387,10 +394,20 @@ sycl::event arc_ll256_allreduce(const void *src,
             });
     });
 
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(
+            &ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
+    }
+
     if (reduction == ccl::reduction::avg) {
         std::vector<sycl::event> evs;
         evs.push_back(sycl_e);
         sycl_e = sycl_average(q, dst, count, comm_size, dtype, evs);
+    }
+
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(
+            &ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
     }
 
     return sycl_e;

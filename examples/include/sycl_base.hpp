@@ -51,8 +51,17 @@
 #define CCL_USE_SYCL121_API 1
 #else // (__LIBSYCL_MAJOR_VERSION < 6)
 #define CCL_USE_SYCL121_API 0
+// Open-source Intel LLVM/DPC++ (from github.com/intel/llvm) defines __LIBSYCL_MAJOR_VERSION
+// but NOT __INTEL_LLVM_COMPILER, so we need to handle it here
+#if !defined(__INTEL_LLVM_COMPILER)
+#define CCL_OPEN_SOURCE_DPCPP 1
+#endif
 #endif // (__LIBSYCL_MAJOR_VERSION < 6)
-#else // __INTEL_LLVM_COMPILER || __LIBSYCL_MAJOR_VERSION
+#elif defined(__clang__) && defined(SYCL_LANGUAGE_VERSION)
+// Fallback for other SYCL-capable clang compilers
+#define CCL_USE_SYCL121_API 0
+#define CCL_OPEN_SOURCE_DPCPP 1
+#else // __INTEL_LLVM_COMPILER || __LIBSYCL_MAJOR_VERSION || open-source DPC++
 #error "Unsupported compiler"
 #endif
 
@@ -553,7 +562,13 @@ struct buf_allocator {
 };
 
 inline sycl::event submit_barrier(sycl::queue queue) {
-#if ICPX_VERSION >= 140000
+#if defined(CCL_OPEN_SOURCE_DPCPP)
+    // Open-source DPC++ doesn't have submit_barrier extension
+    // Use a submit with empty command group that depends on all previous commands
+    return queue.submit([&](sycl::handler& cgh) {
+        cgh.single_task([]() {}); // Empty kernel as barrier
+    });
+#elif ICPX_VERSION >= 140000
     return queue.ext_oneapi_submit_barrier();
 #elif ICPX_VERSION < 140000
     return queue.submit_barrier();

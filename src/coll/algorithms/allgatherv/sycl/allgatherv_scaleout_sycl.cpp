@@ -26,15 +26,14 @@ ccl::event allgatherv_scaleout_sycl_direct(sycl::queue& q,
                                            size_t send_count,
                                            void* recv_buf,
                                            const ccl::vector_class<size_t>& recv_counts,
-                                           size_t orig_count,
-                                           size_t offset,
+                                           const std::vector<size_t>& recv_offsets,
                                            ccl::datatype dtype,
                                            ccl_comm* comm,
                                            const ccl::vector_class<ccl::event>& deps,
                                            bool& done,
                                            bool copy_to_host,
                                            bool is_cpu_buffers,
-                                           void* buf) {
+                                           void* aux_buf) {
     std::shared_ptr<atl_base_comm> atl_comm = comm->get_atl_comm();
     auto ccl_dtype = ccl::global_data::get().dtypes->get(dtype);
 
@@ -43,7 +42,7 @@ ccl::event allgatherv_scaleout_sycl_direct(sycl::queue& q,
 
     std::vector<size_t> recv_scaleout_bytes(comm->size(), send_count * ccl_dtype.size());
     size_t total_scaleout_count = send_count * comm->size();
-    std::vector<size_t> scaleout_offsets(comm->size());
+    std::vector<size_t> scaleout_offsets;
     std::vector<sycl::event> sycl_deps = get_sycl_events(deps);
     sycl::event ev;
     if (copy_to_host) {
@@ -57,10 +56,12 @@ ccl::event allgatherv_scaleout_sycl_direct(sycl::queue& q,
         }
 
         scaleout_send_buf = MPI_IN_PLACE;
-        scaleout_recv_buf = buf ? buf : comm->get_scaleout_host_buf();
+        scaleout_recv_buf = aux_buf ? aux_buf : comm->get_scaleout_host_buf();
+        scaleout_offsets.resize(comm->size());
         for (size_t i = 0; i < comm->size(); i++) {
             scaleout_offsets[i] = i * recv_scaleout_bytes[i];
         }
+
         ev = q.submit([=](sycl::handler& h) {
             h.depends_on(sycl_deps);
             h.memcpy((char*)scaleout_recv_buf + scaleout_offsets[comm->rank()],
@@ -84,13 +85,14 @@ ccl::event allgatherv_scaleout_sycl_direct(sycl::queue& q,
             int ep_idx = 0;
             atl_req_t req;
             std::shared_ptr<atl_base_comm> atl_comm = comm->get_atl_comm();
-            ATL_CALL_THROW_IF_ERROR(atl_comm->allgatherv(ep_idx,
-                                                         scaleout_send_buf,
-                                                         send_count * ccl_dtype.size(),
-                                                         scaleout_recv_buf,
-                                                         recv_scaleout_bytes.data(),
-                                                         scaleout_offsets.data(),
-                                                         req));
+            ATL_CALL_THROW_IF_ERROR(
+                atl_comm->allgatherv(ep_idx,
+                                     scaleout_send_buf,
+                                     send_count * ccl_dtype.size(),
+                                     scaleout_recv_buf,
+                                     recv_scaleout_bytes.data(),
+                                     copy_to_host ? scaleout_offsets.data() : recv_offsets.data(),
+                                     req));
 
             ATL_CALL_THROW_IF_ERROR(atl_comm->check(ep_idx, req));
             if (!req.is_completed) {
@@ -103,6 +105,13 @@ ccl::event allgatherv_scaleout_sycl_direct(sycl::queue& q,
         });
     });
 
+    if (copy_to_host && aux_buf == nullptr) {
+        op_end = q.submit([=](sycl::handler& h) {
+            h.depends_on(op_end);
+            h.memcpy(recv_buf, scaleout_recv_buf, total_scaleout_count * ccl_dtype.size());
+        });
+    }
+
     done = true;
     return ccl::event::create_from_native(op_end);
 }
@@ -112,8 +121,7 @@ ccl::event allgatherv_scaleout_sycl(sycl::queue& q,
                                     size_t send_count,
                                     void* recv_buf,
                                     const ccl::vector_class<size_t>& recv_counts,
-                                    size_t orig_count,
-                                    size_t offset,
+                                    std::vector<size_t>& recv_offsets,
                                     ccl::datatype dtype,
                                     ccl_comm* comm,
                                     const ccl::vector_class<ccl::event>& deps,
@@ -122,7 +130,7 @@ ccl::event allgatherv_scaleout_sycl(sycl::queue& q,
                                     sycl_allgatherv_tune_attr tune_attr,
                                     bool copy_to_host,
                                     bool is_cpu_buffers,
-                                    void* buf) {
+                                    void* aux_buf) {
     auto ccl_dtype = ccl::global_data::get().dtypes->get(dtype);
     switch (tune_attr.algo) {
         case allgatherv_scaleout_algo::direct: {
@@ -135,15 +143,14 @@ ccl::event allgatherv_scaleout_sycl(sycl::queue& q,
                                                      send_count,
                                                      recv_buf,
                                                      recv_counts,
-                                                     orig_count,
-                                                     offset,
+                                                     recv_offsets,
                                                      dtype,
                                                      comm,
                                                      deps,
                                                      done,
                                                      copy_to_host,
                                                      is_cpu_buffers,
-                                                     buf);
+                                                     aux_buf);
 #ifdef CCL_ENABLE_ITT
             ccl::profile::itt::task_end();
 #endif // CCL_ENABLE_ITT
@@ -159,8 +166,7 @@ ccl::event allgatherv_scaleout_sycl(sycl::queue& q,
                                                     send_count,
                                                     recv_buf,
                                                     recv_counts,
-                                                    orig_count,
-                                                    offset,
+                                                    recv_offsets,
                                                     dtype,
                                                     comm,
                                                     deps,

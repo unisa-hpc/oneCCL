@@ -21,7 +21,7 @@
 namespace ccl {
 
 void recycle_storage::recycle_events(size_t threshold, size_t limit) {
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     std::lock_guard<std::mutex> lg(lock_events);
     if (output_sycl_events.size() > critical_threshold) {
         limit = 0;
@@ -86,7 +86,7 @@ void recycle_storage::recycle_events(size_t threshold, size_t limit) {
             ze_pools.erase(ze_pool);
         }
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 }
 
 void recycle_storage::recycle_requests(size_t threshold, size_t limit) {
@@ -117,7 +117,7 @@ void recycle_storage::recycle_requests(size_t threshold, size_t limit) {
 #endif // CCL_ENABLE_SYCL
 }
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
 // Recycle storage respects storage order for ze_pools & related events
 void recycle_storage::store_events(ze::dynamic_event_pool* pool,
                                    const std::shared_ptr<sycl::event>& sync_event,
@@ -127,7 +127,9 @@ void recycle_storage::store_events(ze::dynamic_event_pool* pool,
     sync_sycl_events.push_back(sync_event);
     output_sycl_events.push_back(output_event);
 }
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
+#ifdef CCL_ENABLE_SYCL
 void recycle_storage::store_request(ccl_request* request) {
     std::lock_guard<std::mutex> lg(lock_requests);
     requests.push_back(request);

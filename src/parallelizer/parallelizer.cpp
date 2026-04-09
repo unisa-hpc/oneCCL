@@ -158,6 +158,7 @@ ccl::status ccl_parallelizer::process_output_event(ccl_sched* sched) {
         !ccl::is_queue_in_order(sched->coll_param.stream)) {
         return ccl::status::success;
     }
+#ifdef CCL_ENABLE_ZE
     else if (sched->coll_param.comm->get_env()->get_enable_topo_algo()) {
         auto& part_scheds = sched->get_subscheds();
         size_t sched_count = part_scheds.size();
@@ -169,6 +170,7 @@ ccl::status ccl_parallelizer::process_output_event(ccl_sched* sched) {
 
         entry_factory::create<ze_event_signal_entry>(part_scheds[0].get(), sched);
     }
+#endif // CCL_ENABLE_ZE
     return ccl::status::success;
 }
 #endif // CCL_ENABLE_SYCL

@@ -84,25 +84,26 @@ public:
 
     std::string to_string() const;
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     bool get_enable_topo_algo() const {
         return enable_topo_algo;
     }
-
-    ccl::ze::copy_engine_mode get_ze_copy_engine() const {
-        return ze_copy_engine;
-    }
+    #ifdef CCL_ENABLE_ZE
+        ccl::ze::copy_engine_mode get_ze_copy_engine() const {
+            return ze_copy_engine;
+        }
+    #endif // CCL_ENABLE_ZE
 #endif // CCL_ENABLE_SYCL
 
 private:
     std::shared_ptr<ccl::device> device;
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     bool enable_topo_algo;
     ccl::ze::copy_engine_mode ze_copy_engine;
     ccl::ze::h2d_copy_engine_mode ze_h2d_copy_engine;
 
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 };
 
 #ifdef CCL_ENABLE_SYCL
@@ -890,7 +891,9 @@ public:
     bool is_multi_thread_instance() {
         return enable_multi_thread_instance;
     }
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     // pattern: XYYY xxxx xxxx xxxx
     // X: 1 is collective, 0 is pt2pt
     // YYY: is the source rank of the pt2pt
@@ -924,7 +927,7 @@ public:
             pattern_counter[peer_rank] = counter;
         }
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 
     // collectives operation declarations
     ccl::event barrier(const ccl::stream::impl_value_t& stream,

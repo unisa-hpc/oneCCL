@@ -76,6 +76,7 @@ bool allgatherv(const std::shared_ptr<atl_base_comm>& comm,
                                                   send_len,
                                                   recv_buf,
                                                   recv_lens_size_t.data(),
+                                                  offsets.data(),
                                                   1 /*dtype_size*/,
                                                   comm_rank,
                                                   comm_size);

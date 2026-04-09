@@ -86,7 +86,7 @@ host_event_impl::~host_event_impl() {
         }
     }
 
-#ifdef CCL_ENABLE_SYCL
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     if (sync_event) {
         auto& pools = ccl::global_data::get().ze_data->dynamic_event_pools;
         auto pool_it = pools.find(ze_context);
@@ -97,7 +97,7 @@ host_event_impl::~host_event_impl() {
             recycle_storage->store_events(&(pool_it->second), sync_event, native_event);
         }
     }
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
 }
 
 void host_event_impl::wait() {

@@ -58,8 +58,14 @@ enum ccl_staging_buffer { ccl_staging_regular,
 enum class backend_mode {
     native,
 #ifdef CCL_ENABLE_STUB_BACKEND
-    stub
+    stub,
 #endif // CCL_ENABLE_STUB_BACKEND
+#ifdef CCL_ENABLE_NCCL
+    nccl,
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    rccl,
+#endif // CCL_ENABLE_RCCL
 };
 
 enum class process_launcher_mode {
@@ -252,6 +258,8 @@ public:
     std::string sycl_allgatherv_scaleout_algo;
     size_t sycl_allgatherv_ll_threshold;
     bool sycl_allgatherv_scaleout_overlap;
+    size_t sycl_allgatherv_scaleout_comm_size;
+    size_t sycl_allgatherv_overlap_buf_size;
 
     bool sycl_broadcast_tmp_buf;
     size_t sycl_broadcast_small_threshold;
@@ -320,6 +328,12 @@ public:
     bool mpi_bf16_native;
     bool mpi_fp16_native;
 #endif // CCL_ENABLE_MPI
+#ifdef CCL_ENABLE_NCCL
+    std::string nccl_lib_path;
+#endif // CCL_ENABLE_NCCL
+#ifdef CCL_ENABLE_RCCL
+    std::string rccl_lib_path;
+#endif // CCL_ENABLE_RCCL
     std::string ofi_lib_path;
 
 #if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE) && defined(CCL_ENABLE_UMF)
@@ -345,7 +359,9 @@ public:
 
     bool sync_barrier;
     bool sync_deps;
+#endif // CCL_ENABLE_SYCL
 
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
     bool enable_ze_barrier;
     bool enable_ze_bidir_algo;
     bool enable_ze_cache;
@@ -388,7 +404,7 @@ public:
     type2_tune_mode type2_mode;
     std::string drmfd_dev_render_dir_path;
     std::string drmfd_dev_render_suffix;
-#endif // CCL_ENABLE_SYCL
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
     bool ipc_allgatherv_wa;
 
 #ifdef CCL_ENABLE_PMIX

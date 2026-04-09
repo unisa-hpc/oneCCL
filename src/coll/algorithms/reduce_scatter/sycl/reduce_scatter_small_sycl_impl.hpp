@@ -19,6 +19,13 @@
 #include "coll/algorithms/utils/sycl_coll_base.hpp"
 #include "coll/algorithms/utils/sycl_kernels.hpp"
 
+// Kernel name templates for reduce_scatter_small
+template <typename T, int VS, int SGS, int LB, int GB, int NE, int NP>
+class oneccl_reduce_scatter_small {};
+
+template <typename T, int VS, int SGS, int LB, int GB, int NE, int NP>
+class oneccl_reduce_scatter_small_general {};
+
 // NE is the number of ranks in even_comm and
 // NP is the number of ranks in pair_comm
 template <typename T, int NE, int NP>
@@ -124,7 +131,7 @@ ccl::event reduce_scatter_small_impl(const void* send_buf,
             // general case, original specification of reduce-scatter
             local_event = q.submit([=](sycl::handler& h) {
                 h.depends_on(l_dep_events);
-                h.parallel_for(
+                h.parallel_for<oneccl_reduce_scatter_small<T, VS, SGS, LB, GB, NE, NP>>(
                     sycl::nd_range<1>(kernel_size, wg_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                         auto local_tmp_buf_cpy = local_tmp_buf;
@@ -160,7 +167,7 @@ ccl::event reduce_scatter_small_impl(const void* send_buf,
             // we can merge conditions (MLSL-3401)
             local_event = q.submit([=](sycl::handler& h) {
                 h.depends_on(l_dep_events);
-                h.parallel_for(
+                h.parallel_for<oneccl_reduce_scatter_small_general<T, VS, SGS, LB, GB, NE, NP>>(
                     sycl::nd_range<1>(kernel_size, wg_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                         auto local_tmp_buf_cpy = local_tmp_buf;

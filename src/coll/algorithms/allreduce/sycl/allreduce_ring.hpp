@@ -56,13 +56,13 @@ inline sycl::event allreduce_ring_blocking(sycl::queue &q,
     recv_counts.push_back(last_block_count);
 
     void *send_local_buf = recv_local_buf;
+    std::vector<size_t> offsets;
     sycl::event ag_event = allgatherv_ring_blocking<T>(q,
                                                        send_local_buf,
                                                        ag_send_count,
                                                        recv_buf,
                                                        recv_counts,
-                                                       ag_send_count,
-                                                       0,
+                                                       offsets,
                                                        dtype,
                                                        comm,
                                                        vector_events,
@@ -117,13 +117,13 @@ inline sycl::event allreduce_ring_nonblocking(sycl::queue &q,
     void *send_local_buf = recv_local_buf;
     sycl_allgatherv_tune_attr ag_tune_attr = { allgatherv_scaleout_algo::ring,
                                                tune_attr.pipeline_chunk_size };
+    std::vector<size_t> offsets;
     sycl::event ag_event = allgatherv_ring_nonblocking<T>(q,
                                                           send_local_buf,
                                                           ag_send_count,
                                                           recv_buf,
                                                           recv_counts,
-                                                          ag_send_count,
-                                                          0,
+                                                          offsets,
                                                           dtype,
                                                           comm,
                                                           vector_events,

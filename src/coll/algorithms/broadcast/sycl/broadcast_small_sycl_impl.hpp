@@ -20,6 +20,9 @@
 #include "coll/algorithms/utils/sycl_kernels.hpp"
 #include "coll/algorithms/utils/sycl_coll_base.hpp"
 
+template <typename T, int VS, int use_block, int NE, int NP>
+class oneccl_broadcast_small {};
+
 template <typename T, int N>
 inline void broadcast_kernel(const void* in, std::array<void*, MAX_NODE_RANKS> out, size_t idx) {
 #pragma unroll
@@ -97,7 +100,7 @@ ccl::event broadcast_small_impl(const void* send_buf,
 
         sycl::event local_event = q.submit([=](sycl::handler& h) {
             h.depends_on(sycl_deps);
-            h.parallel_for(
+            h.parallel_for<oneccl_broadcast_small<T, VS, use_block, NE, NP>>(
                 sycl::nd_range<1>(kernel_size, wg_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                     auto remote_ptrs_cpy = remote_ptrs;
