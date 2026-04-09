@@ -23,7 +23,7 @@
 
 // sync_ptrs is used for counting in local kernel_barrier
 static ccl_kernel_barrier_data kernel_barrier_data;
-static thread_local ccl_kernel_barrier_data thread_kernel_barrier_data;
+static ccl_kernel_barrier_data thread_kernel_barrier_data;
 
 // three tmp buffers - 1: work_buf, 2: tmp_send_buf, 3: tmp_recv_buf
 constexpr int tmp_bufs_count = 3;
@@ -608,10 +608,22 @@ void coll_initExt(ccl_comm *comm,
         // alloc sync pointers to be used for global comm_barrier across ranks
         constexpr int num_slots = ccl_comm_barrier_data::slots;
         const size_t ptr_count = num_slots * sub_comms.size();
-        size_t *ptrs0 = sycl::malloc_device<size_t>(ptr_count, q);
+        size_t *ptrs0;
+        if (node_comm->get_topo_manager().has_p2p_access()) {
+            ptrs0 = sycl::malloc_device<size_t>(ptr_count, q);
+        }
+        else {
+            ptrs0 = sycl::malloc_host<size_t>(ptr_count, q);
+        }
         q.memset(ptrs0, 0, ptr_count * sizeof(size_t)).wait();
 
-        size_t *ptrs1 = sycl::malloc_device<size_t>(ptr_count, q);
+        size_t *ptrs1;
+        if (node_comm->get_topo_manager().has_p2p_access()) {
+            ptrs1 = sycl::malloc_device<size_t>(ptr_count, q);
+        }
+        else {
+            ptrs1 = sycl::malloc_host<size_t>(ptr_count, q);
+        }
         q.memset(ptrs1, 0, ptr_count * sizeof(size_t)).wait();
 
         pthread_barrier_wait(
@@ -626,7 +638,13 @@ void coll_initExt(ccl_comm *comm,
             is_thread_initial_invocation = false;
 
             // allocate sync_ptrs for local kernel barrier
-            size_t *sync_ptrs = sycl::malloc_device<size_t>(ccl_kernel_barrier_data::slots, q);
+            size_t *sync_ptrs;
+            if (node_comm->get_topo_manager().has_p2p_access()) {
+                sync_ptrs = sycl::malloc_device<size_t>(ccl_kernel_barrier_data::slots, q);
+            }
+            else {
+                sync_ptrs = sycl::malloc_host<size_t>(ccl_kernel_barrier_data::slots, q);
+            }
 
             // Initialize memory to zero using memset
             q.memset(sync_ptrs, 0, ccl_kernel_barrier_data::slots * sizeof(size_t)).wait();
@@ -651,8 +669,15 @@ void coll_initExt(ccl_comm *comm,
             const size_t align_bytes = ccl::global_data::env().kernel_mem_align;
             tmp_buf_size_per_rank = (tmp_buf_size_per_rank_orig / align_bytes) * align_bytes;
 
-            char *tmp_buf = sycl::aligned_alloc_device<char>(
-                CCL_REG_MSG_ALIGNMENT, tmp_buf_size * tmp_bufs_count, q);
+            char *tmp_buf;
+            if (node_comm->get_topo_manager().has_p2p_access()) {
+                tmp_buf = sycl::aligned_alloc_device<char>(
+                    CCL_REG_MSG_ALIGNMENT, tmp_buf_size * tmp_bufs_count, q);
+            }
+            else {
+                tmp_buf = sycl::aligned_alloc_host<char>(
+                    CCL_REG_MSG_ALIGNMENT, tmp_buf_size * tmp_bufs_count, q);
+            }
 
             for (int i = 0; i < tmp_bufs_count; i++) {
                 thread_tmp_bufs[i] = tmp_buf + i * tmp_buf_size;
@@ -665,8 +690,16 @@ void coll_initExt(ccl_comm *comm,
             comm_large_tmp_bufs.tmp_bufs[i] = thread_tmp_bufs[i];
         }
 
-        int *tmp_bufs_gpu_index = sycl::malloc_device<int>(1, q);
-        int *tmp_bufs_gpu_secondary_index = sycl::malloc_device<int>(1, q);
+        int *tmp_bufs_gpu_index;
+        int *tmp_bufs_gpu_secondary_index;
+        if (node_comm->get_topo_manager().has_p2p_access()) {
+            tmp_bufs_gpu_index = sycl::malloc_device<int>(1, q);
+            tmp_bufs_gpu_secondary_index = sycl::malloc_device<int>(1, q);
+        }
+        else {
+            tmp_bufs_gpu_index = sycl::malloc_host<int>(1, q);
+            tmp_bufs_gpu_secondary_index = sycl::malloc_host<int>(1, q);
+        }
 
         auto t = q.memset(tmp_bufs_gpu_index, 0, sizeof(*tmp_bufs_gpu_index));
         q.memset(tmp_bufs_gpu_secondary_index, 0, sizeof(*tmp_bufs_gpu_secondary_index), t).wait();
@@ -675,8 +708,15 @@ void coll_initExt(ccl_comm *comm,
 
         // set up temp buf to be used for small collectives
         const int small_buf_ipc_idx = ipc_ptrs.size();
-        char *tmp_buf = sycl::aligned_alloc_device<char>(
-            CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        char *tmp_buf;
+        if (node_comm->get_topo_manager().has_p2p_access()) {
+            tmp_buf = sycl::aligned_alloc_device<char>(
+                CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        }
+        else {
+            tmp_buf = sycl::aligned_alloc_host<char>(
+                CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        }
         for (int i = 0; i < ccl_tmp_bufs::buf_count; i++) {
             void *tmp_buf_ptr = tmp_buf + i * ccl_tmp_bufs::buf_size;
             node_comm->set_tmp_buf(tmp_buf_ptr, i);
@@ -693,8 +733,15 @@ void coll_initExt(ccl_comm *comm,
         pthread_barrier_wait(
             &ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
         const int small_buf_ipc_gpu_idx = ipc_ptrs.size();
-        char *tmp_buf_gpu = sycl::aligned_alloc_device<char>(
-            CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        char *tmp_buf_gpu;
+        if (node_comm->get_topo_manager().has_p2p_access()) {
+            tmp_buf_gpu = sycl::aligned_alloc_device<char>(
+                CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        }
+        else {
+            tmp_buf_gpu = sycl::aligned_alloc_host<char>(
+                CCL_REG_MSG_ALIGNMENT, ccl_tmp_bufs::buf_size * ccl_tmp_bufs::buf_count, q);
+        }
         for (int i = 0; i < ccl_tmp_bufs::buf_count; i++) {
             void *tmp_buf_ptr_gpu = tmp_buf_gpu + i * ccl_tmp_bufs::buf_size;
             node_comm->set_tmp_buf_gpu(tmp_buf_ptr_gpu, i);
@@ -864,6 +911,9 @@ std::vector<sycl::event> get_sycl_events(const ccl::vector_class<ccl::event> &de
     return ret;
 }
 
+// Kernel name template for comm_barrier
+class oneccl_invoke_barrier {};
+
 // invoke the global communication barrier kernel
 sycl::event invoke_barrier(const std::shared_ptr<ccl_comm> comm,
                            sycl::queue q,
@@ -884,7 +934,7 @@ sycl::event invoke_barrier(const std::shared_ptr<ccl_comm> comm,
             gpu_increment ? comm->barrier_data() : comm->barrier_inc();
         e = q.submit([=](sycl::handler &h) {
             h.depends_on(dep_events);
-            h.parallel_for(
+            h.parallel_for<oneccl_invoke_barrier>(
                 sycl::nd_range<1>(MAX_NODE_RANKS, MAX_NODE_RANKS),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] {
                     comm_barrier(barrier_data, it, true, gpu_increment);

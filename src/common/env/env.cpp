@@ -206,6 +206,15 @@ env_data::env_data()
           sycl_allgatherv_scaleout_algo("auto"),
           sycl_allgatherv_ll_threshold(2048),
           sycl_allgatherv_scaleout_overlap(1),
+          // sycl_allgatherv_scaleout_comm_size sets the maximum size of scaleout communicator
+          // this variable is introduced for development reasons
+          // CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE=0 allgatherv always falls back to schedule mode
+          // CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE=<size_t max_number> allgatherv always runs in SYCL mode
+          sycl_allgatherv_scaleout_comm_size(8),
+          // experimentally we found out that having a smaller host buffer that
+          // is essential for direct algorithm, makes the algo run more iterations
+          // that drives overlapping and we can see a performance improvement
+          sycl_allgatherv_overlap_buf_size(134217728),
 
           sycl_broadcast_tmp_buf(0),
           sycl_broadcast_small_threshold(524288),
@@ -581,6 +590,8 @@ void env_data::parse() {
     p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT, sycl_allgatherv_scaleout_algo);
     p.env_2_type(CCL_SYCL_ALLGATHERV_LL_THRESHOLD, sycl_allgatherv_ll_threshold);
     p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT_OVERLAP, sycl_allgatherv_scaleout_overlap);
+    p.env_2_type(CCL_SYCL_ALLGATHERV_SCALEOUT_COMM_SIZE, sycl_allgatherv_scaleout_comm_size);
+    p.env_2_type(CCL_SYCL_ALLGATHERV_OVERLAP_BUF_SIZE, sycl_allgatherv_overlap_buf_size);
 
     p.env_2_type(CCL_SYCL_BROADCAST_TMP_BUF, sycl_broadcast_tmp_buf);
     p.env_2_type(CCL_SYCL_BROADCAST_SMALL_THRESHOLD, sycl_broadcast_small_threshold);

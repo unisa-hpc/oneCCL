@@ -233,6 +233,7 @@ void ccl_comm::initExt(int size,
             ccl::impl_dispatch disp;
             ccl_stream* cclstream = get_stream_ptr(disp(op_stream));
             coll_initExt(this, ccl::global_data::get().shared_data->hash_table, cclstream);
+            LOG_DEBUG("invoking multi-threaded path");
         }
     }
 #endif

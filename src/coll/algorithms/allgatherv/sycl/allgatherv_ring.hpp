@@ -28,8 +28,7 @@ inline sycl::event allgatherv_ring_blocking(sycl::queue& q,
                                             size_t send_count,
                                             void* recv_buf,
                                             const ccl::vector_class<size_t>& recv_counts,
-                                            size_t orig_count,
-                                            size_t offset,
+                                            std::vector<size_t>& offsets,
                                             ccl::datatype dtype,
                                             ccl_comm* comm,
                                             const ccl::vector_class<ccl::event>& deps,
@@ -41,14 +40,16 @@ inline sycl::event allgatherv_ring_blocking(sycl::queue& q,
     auto ccl_dtype = ccl::global_data::get().dtypes->get(dtype);
     size_t send_size = send_count * ccl_dtype.size();
     // calculate count offsets
-    std::vector<size_t> offsets(world);
-    for (int rank_idx = 0; rank_idx < world; rank_idx++) {
-        const int global_rank = comm->get_global_rank(rank_idx);
-        offsets[rank_idx] = global_rank * orig_count * ccl_dtype.size() + offset;
+    if (offsets.empty()) {
+        offsets.resize(world);
+        offsets[0] = 0;
+        for (int rank_idx = 1; rank_idx < world; rank_idx++) {
+            offsets[rank_idx] = offsets[rank_idx - 1] + recv_counts[rank_idx - 1] * ccl_dtype.size();
+        }
     }
 
     bool in_place = ccl::is_allgatherv_inplace(
-        send_buf, send_count, recv_buf, recv_counts.data(), ccl_dtype.size(), rank, world);
+        send_buf, send_count, recv_buf, recv_counts.data(), offsets.data(), ccl_dtype.size(), rank, world);
 
     std::vector<sycl::event> dep_events = get_sycl_events(deps);
 
@@ -112,8 +113,7 @@ inline sycl::event allgatherv_ring_nonblocking(sycl::queue& q,
                                                size_t send_count,
                                                void* recv_buf,
                                                const ccl::vector_class<size_t>& recv_counts,
-                                               size_t orig_count,
-                                               size_t offset,
+                                               std::vector<size_t>& offsets,
                                                ccl::datatype dtype,
                                                ccl_comm* comm,
                                                const ccl::vector_class<ccl::event>& deps,
@@ -131,14 +131,16 @@ inline sycl::event allgatherv_ring_nonblocking(sycl::queue& q,
 
     size_t send_size = send_count * ccl_dtype.size();
     // calculate recv counts offsets
-    std::vector<size_t> offsets(world);
-    for (int rank_idx = 0; rank_idx < world; rank_idx++) {
-        const int global_rank = comm->get_global_rank(rank_idx);
-        offsets[rank_idx] = global_rank * orig_count * ccl_dtype.size() + offset;
+    if (offsets.empty()) {
+        offsets.resize(world);
+        offsets[0] = 0;
+        for (int rank_idx = 1; rank_idx < world; rank_idx++) {
+            offsets[rank_idx] = offsets[rank_idx - 1] + recv_counts[rank_idx - 1] * ccl_dtype.size();
+        }
     }
 
     bool in_place = ccl::is_allgatherv_inplace(
-        send_buf, send_count, recv_buf, recv_counts.data(), ccl_dtype.size(), rank, world);
+        send_buf, send_count, recv_buf, recv_counts.data(), offsets.data(), ccl_dtype.size(), rank, world);
 
     std::vector<sycl::event> dep_events = get_sycl_events(deps);
 
@@ -234,8 +236,7 @@ inline sycl::event allgatherv_scaleout_sycl_ring(sycl::queue& q,
                                                  size_t send_count,
                                                  void* recv_buf,
                                                  const ccl::vector_class<size_t>& recv_counts,
-                                                 size_t orig_count,
-                                                 size_t offset,
+                                                 std::vector<size_t>& recv_offsets,
                                                  ccl::datatype dtype,
                                                  ccl_comm* comm,
                                                  const ccl::vector_class<ccl::event>& deps,
@@ -245,7 +246,7 @@ inline sycl::event allgatherv_scaleout_sycl_ring(sycl::queue& q,
     auto lambda = [&]<typename T>() {
         if (ccl::global_data::env().enable_op_sync) {
             return allgatherv_ring_blocking<T>(
-                q, send_buf, send_count, recv_buf, recv_counts, orig_count, offset, dtype, comm, deps, done);
+                q, send_buf, send_count, recv_buf, recv_counts, recv_offsets, dtype, comm, deps, done);
         }
         else {
             return allgatherv_ring_nonblocking<T>(q,
@@ -253,8 +254,7 @@ inline sycl::event allgatherv_scaleout_sycl_ring(sycl::queue& q,
                                                   send_count,
                                                   recv_buf,
                                                   recv_counts,
-                                                  orig_count,
-                                                  offset,
+                                                  recv_offsets,
                                                   dtype,
                                                   comm,
                                                   deps,

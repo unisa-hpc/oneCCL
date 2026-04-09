@@ -171,6 +171,12 @@ bool can_use_sycl_kernels(const ccl_selector_param& param) {
                 ccl::global_data::env().atl_transport == ccl_atl_ofi,
                 "SYCL based Allgather/Allgatherv in multiple node mode supports only MPI transport");
         }
+
+        ccl_comm* r2r_comm = param.comm->get_r2r_comm().get();
+
+        RETURN_FALSE_IF(
+            r2r_comm->size() > ccl::global_data::env().sycl_allgatherv_scaleout_comm_size,
+            "SYCL based Allgather/Allgatherv is not supported at the moment for the larger scale");
     }
 
     // Conditions specific to alltoall
@@ -566,7 +572,13 @@ static sycl_allgatherv_tune_attr allgatherv_auto_select_tune_attr(size_t size,
         }
     }
 
-    if (ccl::global_data::env().atl_transport == ccl_atl_mpi) {
+    if (ccl::global_data::env().atl_transport != ccl_atl_mpi) {
+        return { allgatherv_scaleout_algo::ring };
+    }
+
+    if (comm_size < 4 && (size < 512 * 1024 || size > 128 * 1024 * 1024) ||
+        comm_size >= 4 && comm_size < 8 && (size < 2 * 1024 * 1024 || size > 32 * 1024 * 1024) ||
+        comm_size >= 8 && (size < 2 * 1024 * 1024 || size > 9 * 1024 * 1024)) {
         return { allgatherv_scaleout_algo::direct };
     }
     else {

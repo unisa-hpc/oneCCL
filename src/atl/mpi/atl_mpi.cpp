@@ -217,6 +217,7 @@ atl_status_t atl_mpi::allgatherv(atl_ep_t& ep,
                                               send_len,
                                               recv_buf,
                                               recv_lens_size_t.data(),
+                                              offsets,
                                               1 /*dtype_size*/, // size of MPI_CHAR dtype is 1
                                               rank,
                                               comm_size);

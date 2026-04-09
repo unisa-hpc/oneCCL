@@ -73,8 +73,7 @@ ccl::event allgatherv_small(sycl::queue& q,
                             size_t send_count,
                             void* recv_buf,
                             const ccl::vector_class<size_t>& recv_counts,
-                            size_t orig_count,
-                            size_t offset,
+                            const ccl::vector_class<size_t>& offsets,
                             ccl::datatype dtype,
                             ccl_comm* comm,
                             ccl_stream* global_stream,
@@ -88,7 +87,7 @@ ccl::event allgatherv_small(sycl::queue& q,
 
     auto lambda = [&]<typename T, int NE, int NP>() {
         return allgatherv_small_impl<T, NE, NP>(
-            q, send_buf, send_count, recv_buf, recv_counts, orig_count, offset, dtype, comm, global_stream, deps);
+            q, send_buf, send_count, recv_buf, recv_counts, offsets, dtype, comm, global_stream, deps);
     };
     return invoke_collective(lambda, comm, dtype);
 }

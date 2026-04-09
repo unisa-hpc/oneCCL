@@ -40,6 +40,10 @@ ccl::event reduce_scatter_rt_ring(const void *src,
     bool p2p = node_comm->get_topo_manager().has_p2p_access();
     uint32_t pattern = comm->get_rt_pattern(pattern_type::collective, -1);
 
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(&ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
+    }
+
     auto lambda = [&]<typename T, template <typename, int> class Proto>(int NRanks) {
         T *peerbuf0[NRanks];
         T *peerbuf1[NRanks];
@@ -74,10 +78,18 @@ ccl::event reduce_scatter_rt_ring(const void *src,
         sycl_e = invoke_pcie_type<Rt64_128_PCIE>(lambda, comm_size, dtype);
     }
 
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(&ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
+    }
+
     if (reduction == ccl::reduction::avg) {
         std::vector<sycl::event> evs;
         evs.push_back(sycl_e);
         sycl_e = sycl_average(q, dst, recv_count, comm_size, dtype, evs);
+    }
+
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(&ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
     }
 
     return ccl::event::create_from_native(sycl_e);

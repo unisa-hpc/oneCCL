@@ -19,6 +19,10 @@
 #include "coll/algorithms/utils/sycl_kernels.hpp"
 #include "coll/algorithms/utils/sycl_coll_base.hpp"
 
+// Kernel name template for allgatherv_small
+template <typename T, int VS, int SGS, int LB, int GB, int NE, int NP>
+class oneccl_allgatherv_small_gather {};
+
 template <typename T, int N>
 inline void gather_kernel(std::array<void*, MAX_NODE_RANKS> out,
                           std::array<void*, MAX_NODE_RANKS> in,
@@ -132,8 +136,7 @@ ccl::event allgatherv_small_impl(sycl::queue& q,
                                  size_t send_count,
                                  void* recv_buf,
                                  const ccl::vector_class<size_t>& recv_counts,
-                                 size_t orig_count,
-                                 size_t offset,
+                                 const ccl::vector_class<size_t>& offsets,
                                  ccl::datatype dtype,
                                  ccl_comm* comm,
                                  ccl_stream* global_stream,
@@ -212,7 +215,7 @@ ccl::event allgatherv_small_impl(sycl::queue& q,
         std::array<void*, MAX_NODE_RANKS> out_ptrs;
         // TODO: is it better to only pass recv_buf to the kernel and do this calculation there
         for (int i = 0; i < comm_size; i++) {
-            out_ptrs[i] = (char*)recv_buf + orig_count * i * dsize + offset;
+            out_ptrs[i] = !offsets.empty() ? (char*)recv_buf + offsets[i] : (char*)recv_buf + i * count * dsize;
         }
 
         ccl_kernel_barrier_data kernel_barrier_data = get_kernel_barrier_data(comm).inc_slot();
@@ -221,7 +224,7 @@ ccl::event allgatherv_small_impl(sycl::queue& q,
 
         sycl::event local_event = q.submit([=](sycl::handler& h) {
             h.depends_on(sycl_deps);
-            h.parallel_for(
+            h.parallel_for<oneccl_allgatherv_small_gather<T, VS, SGS, LB, GB, NE, NP>>(
                 sycl::nd_range<1>(kernel_size, wg_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                     auto local_tmp_buf_cpy = local_tmp_buf;

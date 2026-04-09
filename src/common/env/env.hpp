@@ -258,6 +258,8 @@ public:
     std::string sycl_allgatherv_scaleout_algo;
     size_t sycl_allgatherv_ll_threshold;
     bool sycl_allgatherv_scaleout_overlap;
+    size_t sycl_allgatherv_scaleout_comm_size;
+    size_t sycl_allgatherv_overlap_buf_size;
 
     bool sycl_broadcast_tmp_buf;
     size_t sycl_broadcast_small_threshold;

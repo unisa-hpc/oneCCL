@@ -186,6 +186,7 @@ void ccl_comm::init(int comm_id,
             ccl::stream op_stream = ccl::create_stream(q);
             ccl::impl_dispatch disp;
             ccl_stream* cclstream = get_stream_ptr(disp(op_stream));
+            LOG_DEBUG("invoking multi-process path");
             coll_init(this, cclstream);
         }
     }
@@ -316,16 +317,52 @@ ccl_comm* ccl_comm::create_subcomm(int color, int key) const {
 
 ccl_comm* ccl_comm::create_subcomm_split_independent(int color, int key) {
     std::shared_ptr<atl_base_comm> new_atl_comm = get_atl_comm()->comm_split(color, key);
-    ccl_comm* comm = new ccl_comm();
+
+    // Create communicator with is_sub_communicator=true initially so that init()
+    // doesn't try to initialize topo_manager with nullptr device_ptr
+    ccl_comm* comm = new ccl_comm(new_atl_comm->get_comm_id(),
+                                  new_atl_comm,
+                                  true /*share_resources*/,
+                                  true /*is_sub_communicator*/);
+
+    // Copy device and context pointers from parent
     comm->device_ptr = this->device_ptr;
     comm->context_ptr = this->context_ptr;
 
-    // is_sub_communicator is set to false because the function is creating a new communicator
-    // that is not a sub-communicator. This means that the new communicator will have its own
-    // topology manager and subcommunicators, and it will not inherit these from the parent
-    // communicator. This is necessary to ensure that the new communicator is fully independent.
-    comm->init(
-        new_atl_comm->get_comm_id(), new_atl_comm, true /*share_resources*/, false /*subcomm*/);
+    // Now initialize topo_manager and create topo sub-communicators for the split comm
+    // These will be properly sized for the split group (not inherited from parent)
+    comm->topo_manager.init(new_atl_comm, comm->device_ptr, comm->context_ptr);
+    if (!comm->rank() && comm->device_ptr) {
+        LOG_INFO("split comm topo_manager:", comm->topo_manager.to_string());
+    }
+    comm->create_topo_subcomms(new_atl_comm);
+
+#if defined(CCL_ENABLE_SYCL) && defined(CCL_ENABLE_ZE)
+    // Initialize IPC exchange mode based on new node_comm
+    if (comm->node_comm) {
+        comm->init_ipc_exchange_mode(comm->node_comm);
+    }
+
+    // Initialize pattern_counter for SYCL kernels
+    for (int i = 0; i < ARC_MAX_NUM + 1; i++) {
+        comm->pattern_counter[i] = 0xa770;
+    }
+
+    // Initialize SYCL kernel buffers and do IPC exchange for the split communicator
+    if (ccl::global_data::env().enable_sycl_kernels && comm->device_ptr != NULL) {
+        sycl::queue q(comm->device_ptr->get_native());
+        if (q.get_context().get_backend() == sycl::backend::ext_oneapi_level_zero) {
+            ccl::stream op_stream = ccl::create_stream(q);
+            ccl::impl_dispatch disp;
+            ccl_stream* cclstream = get_stream_ptr(disp(op_stream));
+            LOG_DEBUG("invoking coll_init for split comm");
+            coll_init(comm, cclstream);
+        }
+    }
+#endif // CCL_ENABLE_SYCL && CCL_ENABLE_ZE
+
+    // Inherit environment settings
+    comm->env = this->env;
 
     LOG_DEBUG("Base rank: ",
               get_atl_comm()->get_rank(),

@@ -22,6 +22,16 @@
 #include "coll/algorithms/utils/sycl_coll_base.hpp"
 #include "coll/reduction/reduction.hpp"
 
+// Kernel name templates for allreduce_small
+template <typename T, int V, int S, int L, int G, int NE, int NP>
+class oneccl_reduce_base {};
+
+template <typename T, int NE, int NP>
+class oneccl_reduce_base_general {};
+
+template <typename T, int NE, int NP>
+class oneccl_copy_data_internal {};
+
 // NE is the number of ranks in even_comm and
 // NP is the number of ranks in pair_comm
 template <typename T, int NE, int NP>
@@ -108,7 +118,7 @@ ccl::event allreduce_small_impl(const void *send_buf,
 
         sycl::event local_event = q.submit([=](sycl::handler &h) {
             h.depends_on(l_dep_events);
-            h.parallel_for(
+            h.parallel_for<oneccl_reduce_base<T, VS, SGS, LB, GB, NE, NP>>(
                 sycl::nd_range<1>(kernel_size, wg_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                     auto local_tmp_buf_cpy = local_tmp_buf;
@@ -275,7 +285,7 @@ ccl::event allreduce_small_impl(const void *send_buf,
 
             kernel_event = q.submit([=](sycl::handler &h) {
                 h.depends_on(dep_events);
-                h.parallel_for(
+                h.parallel_for<oneccl_reduce_base_general<T, NE, NP>>(
                     sycl::nd_range<1>(kernel_size, wg_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                         // <vec_size, use_block, use_local_barrier, use_global_barrier, read_all, multiplier>
@@ -296,7 +306,7 @@ ccl::event allreduce_small_impl(const void *send_buf,
             ccl_comm_barrier_data comm_barrier_data_next = node_comm->barrier_inc();
             kernel_event = q.submit([=](sycl::handler &h) {
                 h.depends_on(kernel_event);
-                h.parallel_for(
+                h.parallel_for<oneccl_copy_data_internal<T, NE, NP>>(
                     sycl::nd_range<1>(kernel_size, wg_size),
                     [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                         // global communication barrier across ranks

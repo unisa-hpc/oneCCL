@@ -25,8 +25,7 @@ ccl::event allgatherv_ll_ring(sycl::queue &q,
                               size_t send_count,
                               void *recv_buf,
                               const ccl::vector_class<size_t> &recv_counts,
-                              size_t orig_count,
-                              size_t offset,
+                              const ccl::vector_class<size_t> &offsets,
                               ccl::datatype dtype,
                               ccl_comm *comm,
                               ccl_stream *global_stream,
@@ -43,6 +42,10 @@ ccl::event allgatherv_ll_ring(sycl::queue &q,
 
     bool p2p = node_comm->get_topo_manager().has_p2p_access();
     uint32_t pattern = comm->get_rt_pattern(pattern_type::collective, -1);
+
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(&ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
+    }
 
     auto lambda = [&]<typename T, template <typename, int> class Proto>(int NRanks) {
         T *peerbuf0[NRanks];
@@ -78,6 +81,10 @@ ccl::event allgatherv_ll_ring(sycl::queue &q,
     else {
         // simple ring with LL256
         sycl_e = invoke_pcie_type<Rt64_128_PCIE>(lambda, comm_size, dtype);
+    }
+
+    if (comm->is_multi_thread_instance() == true) {
+        pthread_barrier_wait(&ccl::global_data::get().shared_data->barrier_waits[comm->global_current_id]);
     }
 
     return ccl::event::create_from_native(sycl_e);

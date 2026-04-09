@@ -196,6 +196,12 @@ inline void comm_barrier(ccl_comm_barrier_data barrier_data,
     }
 }
 
+// Kernel name templates for kernel_memcpy
+template <typename Type>
+class oneccl_kernel_memcpy_typed {};
+
+class oneccl_kernel_memcpy_bytes {};
+
 static inline sycl::event kernel_memcpy(sycl::queue &q,
                                         const void *send_buf,
                                         void *recv_buf,
@@ -235,7 +241,7 @@ static inline sycl::event kernel_memcpy(sycl::queue &q,
                 const size_t loop_size = nof_workgroups * wg_size;
                 return q.submit([=](sycl::handler &h) {
                     h.depends_on(dep_events);
-                    h.parallel_for(
+                    h.parallel_for<oneccl_kernel_memcpy_typed<Type>>(
                         sycl::nd_range<1>(loop_size, wg_size),
                         [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                             size_t idx = it.get_global_linear_id();
@@ -295,7 +301,7 @@ static inline sycl::event kernel_memcpy(sycl::queue &q,
         const size_t loop_size = nof_workgroups * wg_size;
         return q.submit([=](sycl::handler &h) {
             h.depends_on(dep_events);
-            h.parallel_for(
+            h.parallel_for<oneccl_kernel_memcpy_bytes>(
                 sycl::nd_range<1>(loop_size, wg_size),
                 [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(sg_size)]] {
                     size_t idx = it.get_global_linear_id();
@@ -589,6 +595,10 @@ inline void pre_operation(void *buf,
     }
 }
 
+// Kernel name template for pre_operation
+template <typename T, int VS, int SGS>
+class oneccl_pre_operation {};
+
 template <typename T, int VS, int SGS>
 inline sycl::event pre_operation_invoke(sycl::queue &q,
                                         void *buf,
@@ -602,18 +612,23 @@ inline sycl::event pre_operation_invoke(sycl::queue &q,
     const size_t kernel_size = ((kernel_threads + wg_size - 1) / wg_size) * wg_size;
     return q.submit([=](sycl::handler &h) {
         h.depends_on(dep_events);
-        h.parallel_for(sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
-            void *buf_local = buf;
-            if (is_recording) {
-                size_t offset_bytes = *tmp_buf_idx * ccl_tmp_bufs::buf_size;
-                buf_local = (void *)((uintptr_t)buf + offset_bytes);
-            }
-            pre_operation<T, VS>(buf_local, count, reduction, it);
-        });
+        h.parallel_for<oneccl_pre_operation<T, VS, SGS>>(
+            sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
+                void *buf_local = buf;
+                if (is_recording) {
+                    size_t offset_bytes = *tmp_buf_idx * ccl_tmp_bufs::buf_size;
+                    buf_local = (void *)((uintptr_t)buf + offset_bytes);
+                }
+                pre_operation<T, VS>(buf_local, count, reduction, it);
+            });
     });
 }
 
 /* AVERAGE KERNEL */
+
+// Kernel name template for reduce_average
+template <typename T, int VS, int SGS>
+class oneccl_reduce_average {};
 
 template <typename T>
 inline void reduce_average_kernel(void *buf, const size_t n, size_t idx) {
@@ -651,14 +666,19 @@ inline sycl::event reduce_average_invoke(sycl::queue &q,
     int kernel_size = (kernel_threads + wg_size - 1) / wg_size * wg_size;
     sycl::event e = q.submit([=](sycl::handler &h) {
         h.depends_on(dep_events);
-        h.parallel_for(sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
-            reduce_average<T, VS>(reduce_buf, reduce_count, average_divisor, it);
-        });
+        h.parallel_for<oneccl_reduce_average<T, VS, SGS>>(
+            sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
+                reduce_average<T, VS>(reduce_buf, reduce_count, average_divisor, it);
+            });
     });
     return e;
 }
 
 /* REDUCE PAIR (2 BUFFERS) KERNEL*/
+
+// Kernel name template for reduce_pair
+template <typename T, int VS, int SGS>
+class oneccl_reduce_pair {};
 
 template <typename T, typename ReduceOp>
 inline void reduce_pair_kernel(const void *in1_,
@@ -721,9 +741,10 @@ inline sycl::event reduce_pair_invoke(sycl::queue &q,
     const size_t kernel_size = ((kernel_threads + wg_size - 1) / wg_size) * wg_size;
     return q.submit([=](sycl::handler &h) {
         h.depends_on(dep_events);
-        h.parallel_for(sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
-            reduce_pair<T, VS>(in1, in2, out, reduce_count, reduction, it);
-        });
+        h.parallel_for<oneccl_reduce_pair<T, VS, SGS>>(
+            sycl::nd_range<1>(kernel_size, wg_size), [=](sycl::nd_item<1> it) {
+                reduce_pair<T, VS>(in1, in2, out, reduce_count, reduction, it);
+            });
     });
 }
 
